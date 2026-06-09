@@ -4,13 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.1.0) - 2026-06-09
 
-Adds the second brain adapter (Codex CLI) and factors the shared launcher core
-out of the Claude-specific module. Because 0.1.0 has not been published to PyPI
-and has no consumers yet, the provider-neutral rename is done now to avoid a
-later deprecation shim — these are breaking import-path changes relative to the
-committed 0.1.0 baseline.
+First release of `kagura-brain` — the provider-neutral "brain" axis for Kagura
+harnesses, counterpart to `kagura-memory`. Supersedes the short-lived
+`kagura-claude-harness` (whose name bound it to a single vendor); the launcher
+code carries that package's hardening forward. Ships two adapters — Claude Code
+(`claude -p`) and Codex CLI (`codex exec`) — over one shared launcher `core`,
+with subscription-auth hygiene and an opt-in BYO-endpoint mode. (The "Changed"/
+"Removed" entries below record the provider-neutral rename of the unpublished
+`kagura-claude-harness` baseline, folded into this first published release.)
 
 ### Added
 - `core` — the provider-agnostic launcher seam: `BrainResult`, `_run`
@@ -40,6 +43,8 @@ committed 0.1.0 baseline.
   override; mutually exclusive with `endpoint`/`api_key`) and the
   `codex.OLLAMA_CLOUD_ENDPOINT` preset (alias `endpoint="ollama-cloud"`). No
   Claude-side Ollama preset — Ollama Cloud is OpenAI-, not Anthropic-, compatible.
+- `verdict` — canonical `PROCEED` set, normalization (coerces non-`str` input so an
+  off-contract verdict safe-halts), and exit-code map (contract only).
 
 ### Changed
 - `brain.invoke()` → `claude.invoke()` — the Claude adapter now lives in
@@ -51,28 +56,6 @@ committed 0.1.0 baseline.
 - `kagura_brain.brain` and `kagura_brain.proc` modules — their contents moved to
   `core` / `claude` (see Changed). No deprecation shim (no published consumers).
 
-## [0.1.0] - 2026-06-09
-
-First release of `kagura-brain` — the provider-neutral "brain" axis for Kagura
-harnesses, counterpart to `kagura-memory`. Supersedes the short-lived
-`kagura-claude-harness` (whose name bound it to a single vendor); the launcher
-code carries that package's hardening forward.
-
-### Added
-- `proc` — `as_text` (normalize subprocess stdout/stderr, incl. timeout bytes) and
-  generic `mcp_args` (`--mcp-config` / `--allowedTools` argv, memory-vocabulary-free;
-  a bare-`str` `allowed_tools` is treated as one tool, not splatted into characters).
-- `brain.invoke()` — headless `claude -p` launcher on subscription auth: strips a
-  stale `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` deny-set so they cannot override
-  the login; passes the prompt after a `--` separator (a leading-`-` prompt can't be
-  parsed as a flag); decodes output as utf-8/`errors="replace"`; timeout normalization
-  where `BrainResult.detail()` surfaces captured partial stdout; and `extract_block`
-  for sentinel-delimited payloads (CRLF-normalized).
-- `verdict` — canonical `PROCEED` set, normalization (coerces non-`str` input so an
-  off-contract verdict safe-halts), and exit-code map (contract only).
-
 ### Notes
 - Depends on **no** memory package by design (brain axis vs. memory axis).
-- Today the only adapter is Claude Code (`claude -p`); a Codex CLI adapter
-  (`codex exec`) is planned to share the same core.
 - `doctor` primitives (git/claude/gh/ollama/reachability) are still pending.

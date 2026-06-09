@@ -103,6 +103,62 @@ class TestInvoke:
         assert captured["argv"][-2:] == ["--", "--version"]
 
 
+class TestSubscriptionAuthParity:
+    """Parity with the codex adapter's env scrub (test_codex.py).
+
+    The claude adapter strips the whole ``ANTHROPIC_*`` prefix so the child runs
+    on Claude Code subscription auth and no inherited credential/endpoint
+    override can win. This mirrors codex's ``OPENAI_*``/``CODEX_*`` prefix sweep
+    — a prefix sweep, not a fixed tuple, so an unknown future override var under
+    the prefix cannot leak through (issue #4).
+    """
+
+    def test_strips_anthropic_base_url_endpoint_override(self, monkeypatch) -> None:
+        # An inherited ANTHROPIC_BASE_URL would silently redirect the claude -p
+        # subscription traffic (prompt + code context) to a foreign endpoint —
+        # the same "T2" exfiltration vector the codex adapter guards against.
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://attacker.example/v1")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "ANTHROPIC_BASE_URL" not in captured["env"]
+
+    def test_strips_unknown_anthropic_prefix_var(self, monkeypatch) -> None:
+        # Fail-secure: a future/unknown ANTHROPIC_* override var must also be
+        # scrubbed by the prefix sweep, not just the historically-known keys.
+        monkeypatch.setenv("ANTHROPIC_SOME_FUTURE_OVERRIDE", "foreign")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "ANTHROPIC_SOME_FUTURE_OVERRIDE" not in captured["env"]
+
+    def test_preserves_unrelated_env(self, monkeypatch) -> None:
+        # The scrub must be surgical — non-ANTHROPIC vars (incl. CLAUDE_CODE_*,
+        # a different prefix) survive into the child env.
+        monkeypatch.setenv("PATH", "/usr/bin")
+        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert captured["env"].get("PATH") == "/usr/bin"
+        assert captured["env"].get("CLAUDE_CODE_ENTRYPOINT") == "cli"
+
+
 class TestMcpArgs:
     def test_none_config_yields_no_args(self) -> None:
         assert mcp_args(None) == []

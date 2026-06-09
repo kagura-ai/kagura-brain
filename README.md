@@ -8,9 +8,29 @@ re-implementing the same seams: launching the agent, stripping stale provider
 credentials so subscription auth wins, parsing exit codes and sentinel markers,
 and normalizing output. This package centralizes those seams.
 
-Today the only adapter is **Claude Code (`claude -p`)**. The launcher shape is
-provider-agnostic by design — a **Codex CLI (`codex exec`)** adapter is planned as
-a sibling so the same `verdict` / `extract_block` / subprocess core serves both.
+Two adapters ship today — **Claude Code (`claude -p`)** and **Codex CLI
+(`codex exec`)** — as thin siblings over one shared launcher core (`core._run` +
+`verdict` + `extract_block`). Each strips its provider's credential/endpoint
+overrides from the child env so the CLI's **subscription** login wins:
+`claude` deny-sets `ANTHROPIC_*`; `codex` prefix-scrubs `OPENAI_*`/`CODEX_*`
+(including `OPENAI_BASE_URL` and `CODEX_HOME`).
+
+```python
+from kagura_brain import claude, codex
+
+claude.invoke("…prompt…", mcp_config=".mcp.json")   # claude -p
+codex.invoke("…prompt…", sandbox="read-only")       # codex exec
+```
+
+**MCP / approval differs by provider.** Claude takes per-call `--mcp-config` /
+`--allowedTools` (see `claude.mcp_args`). Codex manages MCP servers persistently
+via `codex mcp` / `~/.codex/config.toml` (no per-call flag), and its sandbox /
+approval is opt-in: pass `sandbox=` (`read-only` | `workspace-write` |
+`danger-full-access`) or `bypass_approvals=True` — neither is loosened by default.
+
+Routing a CLI at a caller-chosen endpoint (Ollama Cloud / BYO gateway) is the
+deliberate inverse of the credential scrub and is tracked separately
+([#2](https://github.com/kagura-ai/kagura-brain/issues/2)).
 
 ## Why a separate package (not folded into the memory SDK)
 
@@ -19,7 +39,7 @@ Harness-support code splits cleanly along **two axes**:
 | Axis | Belongs in | Examples |
 |------|-----------|----------|
 | **memory** | `kagura-memory-python-sdk` | sync client facade, `.mcp.json` setup, auth resolution, recall |
-| **brain** | **this package** | CLI-agent launcher (`claude -p` today), subscription-auth hygiene, verdict contract, doctor primitives |
+| **brain** | **this package** | CLI-agent launcher (`claude -p` + `codex exec`), subscription-auth hygiene, verdict contract, doctor primitives |
 
 Pushing CLI-agent spawning into a memory SDK would invert the layers
 ("memory spawns the agent"). So the brain axis lives here, and this package
@@ -46,10 +66,10 @@ this package depends on **no** memory package (see the axis split above).
 
 Public surface is built incrementally under TDD, one consumer migration per PR:
 
-- [x] `proc` — `as_text`, generic `mcp_args`
-- [x] `brain.invoke()` — headless `claude -p` launcher (provider-credential deny-set, `--`-guarded prompt, utf-8 decode, timeout, marker extract)
+- [x] `core` — shared seam: `BrainResult`, `_run` (subprocess + env-scrub + timeout + utf-8 decode), `as_text`, `extract_block`
+- [x] `claude.invoke()` — headless `claude -p` launcher (`ANTHROPIC_*` deny-set, `--`-guarded prompt, `mcp_args`)
+- [x] `codex.invoke()` — headless `codex exec` launcher (`OPENAI_*`/`CODEX_*` prefix scrub, `--`-guarded prompt, opt-in sandbox)
 - [x] `verdict` — `PROCEED` set + exit-code map (contract only)
-- [ ] `brain` — Codex CLI (`codex exec`) adapter sharing the core
 - [ ] `doctor` — git/claude/gh/ollama/reachability check primitives
 
 ## Development

@@ -5,19 +5,24 @@ memory axis (``kagura-memory``): the seams that drive a headless CLI coding agen
 as a brain, kept out of the memory SDK so the layering stays clean (memory never
 spawns the agent).
 
-Today it drives Claude Code (``claude -p``). The launcher shape is
-provider-agnostic by design — a Codex CLI adapter (``codex exec``) is planned as
-a sibling so the same ``verdict`` / ``extract_block`` / subprocess+env+timeout
-core serves both.
+Two adapters drive their CLIs (``claude -p`` and ``codex exec``) as thin
+siblings over one shared launcher core, so the same ``verdict`` /
+``extract_block`` / subprocess+env+timeout seam serves both.
 
 Surface (built incrementally, TDD, one consumer per PR):
 
-- ``proc``    — subprocess helpers (``as_text``, generic ``mcp_args``).
-- ``brain``   — ``invoke()`` headless ``claude -p`` launcher: strips stale
-                provider credentials so subscription auth wins, stdout fallback,
-                timeout normalization, exit-code + sentinel extraction.
+- ``core``    — provider-agnostic seam: ``BrainResult``, ``_run`` (subprocess +
+                per-adapter env-scrub + timeout + utf-8 decode), ``as_text``,
+                ``extract_block``.
+- ``claude``  — ``invoke()`` headless ``claude -p`` launcher (``ANTHROPIC_*``
+                deny-set, ``--``-guarded prompt, ``mcp_args``).
+- ``codex``   — ``invoke()`` headless ``codex exec`` launcher (``OPENAI_*`` /
+                ``CODEX_*`` prefix scrub, ``--``-guarded prompt, opt-in sandbox).
 - ``verdict`` — canonical ``PROCEED`` set + exit-code map (contract only).
 - ``doctor``  — reusable environment-check primitives (git/claude/gh/ollama) [planned].
+
+Both adapters strip their provider's credential/endpoint overrides from the
+child env so the CLI's **subscription** login wins.
 
 Deliberately depends on **no** memory package — the memory axis folds up into
 kagura-memory-python-sdk instead.
@@ -25,6 +30,8 @@ kagura-memory-python-sdk instead.
 
 from __future__ import annotations
 
+from . import claude, codex, core, verdict
+
 __version__ = "0.1.0"
 
-__all__ = ["__version__"]
+__all__ = ["__version__", "claude", "codex", "core", "verdict"]

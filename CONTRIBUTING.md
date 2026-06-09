@@ -39,6 +39,48 @@ CI runs lint + format check + `mypy` strict, and the test suite on Python
 3.11 / 3.12 / 3.13. Coverage must stay at or above the `fail_under` threshold
 in `pyproject.toml` (90%).
 
+## Manual smoke (real CLI)
+
+The automated suite mocks `subprocess.run`, so it never launches a real `claude`
+or `codex`. Before a release (or after touching an adapter's argv / env scrub),
+run this **manual** smoke once to confirm the adapters drive the real CLIs on
+**subscription auth** and that the credential scrub holds end-to-end.
+
+**Why it is not in CI:** it requires `claude` and `codex` logged in with
+subscription credentials, which cannot be provisioned in CI; a real model call is
+also slow and flaky. CI deliberately stops at the mocked suite.
+
+Prerequisites: `claude` and `codex` installed and logged in (`claude` via your
+Claude subscription, `codex login` for the Codex subscription).
+
+```bash
+# Decoys: a bogus key + a foreign endpoint for BOTH providers. If the scrub works,
+# the child never sees these — the subscription login wins and the call succeeds.
+# If the scrub regressed, the call fails (bad key) or the request is redirected.
+export ANTHROPIC_API_KEY="sk-ant-bogus-should-be-stripped"
+export ANTHROPIC_BASE_URL="https://decoy.invalid/v1"
+export OPENAI_API_KEY="sk-openai-bogus-should-be-stripped"
+export OPENAI_BASE_URL="https://decoy.invalid/v1"
+
+uv run python - <<'PY'
+from kagura_brain import claude, codex
+
+for name, mod in (("claude", claude), ("codex", codex)):
+    res = mod.invoke("Reply with exactly: PONG")
+    ok = res.returncode == 0 and not res.timed_out and "PONG" in res.stdout
+    print(f"{name}: rc={res.returncode} timed_out={res.timed_out} "
+          f"-> {'PASS' if ok else 'FAIL'}")
+    if not ok:
+        print(f"  stdout: {res.stdout[:200]!r}")
+        print(f"  stderr: {res.stderr[:200]!r}")
+PY
+```
+
+Both lines must print `PASS`. A `FAIL` with an "Invalid API key" / auth error
+means the bogus key leaked into the child (scrub regression); a success that
+reaches the decoy host means the endpoint override was not stripped. Either is a
+release blocker.
+
 ## Workflow
 
 1. Branch from `main`: `git checkout -b {issue}-{type}/{description}`

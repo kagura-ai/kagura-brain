@@ -37,9 +37,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, extract_block
+from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, byo_inject_env, extract_block
 
-__all__ = ["BrainResult", "extract_block", "invoke"]
+__all__ = ["BrainResult", "OLLAMA_CLOUD_ENDPOINT", "extract_block", "invoke"]
+
+# Convenience preset for the BYO-endpoint mode (issue #2): Ollama Cloud exposes
+# an OpenAI-compatible API, so pass ``endpoint="ollama-cloud"`` (the alias) or
+# this constant to ``invoke`` and it resolves to this URL. There is no Claude-side
+# preset — Claude Code speaks the Anthropic protocol and Ollama Cloud does not
+# expose an Anthropic-compatible endpoint, so the claude adapter takes a
+# caller-supplied gateway URL only.
+OLLAMA_CLOUD_ENDPOINT = "https://ollama.com/v1"
+
+# ``endpoint="ollama-cloud"`` is a friendly alias for OLLAMA_CLOUD_ENDPOINT. A
+# real endpoint is always a URL, so this short token cannot collide with one.
+_ENDPOINT_ALIASES = {"ollama-cloud": OLLAMA_CLOUD_ENDPOINT}
+
+# Local backends Codex can drive via ``--oss --local-provider`` (Codex 0.133.0).
+_LOCAL_PROVIDERS = ("ollama", "lmstudio")
 
 # Codex CLI version whose `codex exec` argv + auth/env surface this adapter was
 # verified against. Bump on CLI upgrade and RE-AUDIT the deny-set prefixes below
@@ -63,6 +78,9 @@ def invoke(
     timeout: int = _DEFAULT_TIMEOUT_S,
     sandbox: str | None = None,
     bypass_approvals: bool = False,
+    endpoint: str | None = None,
+    api_key: str | None = None,
+    local_provider: str | None = None,
 ) -> BrainResult:
     """Run one headless ``codex exec`` on Codex (ChatGPT subscription) auth.
 
@@ -70,6 +88,22 @@ def invoke(
     :func:`kagura_brain.core._run`) so the subscription login wins. ``sandbox``
     (one of :data:`_SANDBOX_MODES`) and ``bypass_approvals`` are opt-in; neither
     is set by default. Raises ``ValueError`` for an unrecognized ``sandbox`` mode.
+
+    **BYO endpoint (issue #2, opt-in).** Two mutually-exclusive non-default
+    backends:
+
+    - *Cloud / gateway* — ``endpoint`` + ``api_key`` (both required) are injected
+      as ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` *after* the scrub, so the
+      caller-chosen endpoint wins while ambient overrides stay stripped.
+      ``endpoint="ollama-cloud"`` is an alias for :data:`OLLAMA_CLOUD_ENDPOINT`.
+      A non-https endpoint warns; supplying only one of the pair raises.
+    - *Local* — ``local_provider`` (one of :data:`_LOCAL_PROVIDERS`) emits
+      ``--oss --local-provider <p>`` for a local ollama/lmstudio backend. This
+      needs no env override, so the scrub is untouched (nothing injected).
+
+    Passing ``local_provider`` together with ``endpoint``/``api_key`` is a
+    ``ValueError`` (a local backend and a remote endpoint are contradictory).
+    With none of the three, the default subscription-auth path is unchanged.
     """
     if sandbox is not None and bypass_approvals:
         # --dangerously-bypass-approvals-and-sandbox overrides any sandbox
@@ -78,6 +112,14 @@ def invoke(
         raise ValueError(
             "sandbox and bypass_approvals are mutually exclusive: "
             "--dangerously-bypass-approvals-and-sandbox overrides the sandbox policy"
+        )
+    if local_provider is not None and (endpoint is not None or api_key is not None):
+        # A local --oss backend and a remote BYO endpoint are contradictory: one
+        # routes to a local process, the other to a remote URL. Reject rather
+        # than silently letting one win.
+        raise ValueError(
+            "local_provider is mutually exclusive with endpoint/api_key: "
+            "choose a local backend OR a remote endpoint, not both"
         )
     flags: list[str] = []
     if sandbox is not None:
@@ -88,8 +130,32 @@ def invoke(
         flags += ["--sandbox", sandbox]
     if bypass_approvals:
         flags.append("--dangerously-bypass-approvals-and-sandbox")
+    if local_provider is not None:
+        if local_provider not in _LOCAL_PROVIDERS:
+            raise ValueError(
+                f"invalid local_provider {local_provider!r}; "
+                f"expected one of {_LOCAL_PROVIDERS}"
+            )
+        flags += ["--oss", "--local-provider", local_provider]
+    # Resolve the friendly alias (e.g. "ollama-cloud") to its URL before building
+    # the BYO inject-env; a literal URL (or None) passes through unchanged.
+    resolved_endpoint = endpoint
+    if endpoint is not None:
+        resolved_endpoint = _ENDPOINT_ALIASES.get(endpoint, endpoint)
+    inject_env = byo_inject_env(
+        resolved_endpoint,
+        api_key,
+        url_key="OPENAI_BASE_URL",
+        token_key="OPENAI_API_KEY",
+    )
     # The prompt is positional; ``exec`` also has subcommands (resume/review/help)
     # and a prompt beginning with ``-`` would parse as an option. The ``--``
     # separator forces the prompt to be the prompt in both cases.
     argv = ["codex", "exec", *flags, "--", prompt]
-    return _run(argv, cwd=cwd, timeout=timeout, deny_prefixes=_AUTH_OVERRIDE_PREFIXES)
+    return _run(
+        argv,
+        cwd=cwd,
+        timeout=timeout,
+        deny_prefixes=_AUTH_OVERRIDE_PREFIXES,
+        inject_env=inject_env,
+    )

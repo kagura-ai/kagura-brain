@@ -1,0 +1,104 @@
+name: Publish to PyPI
+
+# Trusted Publishing (OIDC) — no API tokens stored in the repo.
+# Before the first run, register a pending publisher on each index:
+#   TestPyPI: https://test.pypi.org/manage/account/publishing/
+#   PyPI:     https://pypi.org/manage/account/publishing/
+# with owner=kagura-ai, repo=kagura-brain, workflow=publish.yml,
+# and the matching environment name (testpypi / pypi).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Publish target"
+        required: true
+        default: "testpypi"
+        type: choice
+        options:
+          - testpypi
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build
+        run: uv build
+
+      - name: Check metadata
+        run: uvx twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        # Idempotent + race-safe: treat "already exists" as success so a
+        # release created out-of-band (e.g. by a release skill) does not 422.
+        run: |
+          if gh release view "$REF" >/dev/null 2>&1; then
+            echo "Release $REF already exists, skipping."
+          elif gh release create "$REF" --generate-notes; then
+            echo "Created release $REF."
+          elif gh release view "$REF" >/dev/null 2>&1; then
+            echo "Release $REF was created concurrently; treating as success."
+          else
+            echo "Failed to create release $REF." >&2
+            exit 1
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ github.ref_name }}

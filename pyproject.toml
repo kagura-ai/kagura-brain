@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kagura-brain"
+dynamic = ["version"]
+description = "Brain layer for Kagura harnesses — headless CLI coding-agent launcher (claude -p today), subscription-auth hygiene, verdict, doctor primitives"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Kagura AI", email = "dev@kagura-ai.com" }]
+keywords = ["claude-code", "ai-agent", "harness", "kagura", "subprocess", "headless"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
+# NOTE: axis-2 (Claude Code driving) lib — deliberately does NOT depend on
+# kagura-memory. The memory axis lives in the SDK; keeping this dependency-free
+# of memory makes the orthogonal-axes split structural (no cycle, no inversion).
+dependencies = [
+    "pydantic>=2.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=6.0", "mypy>=1.10", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/kagura-ai/kagura-brain"
+Repository = "https://github.com/kagura-ai/kagura-brain"
+Issues = "https://github.com/kagura-ai/kagura-brain/issues"
+Changelog = "https://github.com/kagura-ai/kagura-brain/blob/main/CHANGELOG.md"
+
+[tool.hatch.version]
+path = "src/kagura_brain/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kagura_brain"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src/kagura_brain"]
+
+[tool.coverage.report]
+fail_under = 90
+
+[tool.mypy]
+strict = true
+files = ["src"]
+
+[tool.ruff]
+target-version = "py311"

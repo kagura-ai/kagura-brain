@@ -10,9 +10,18 @@ the adapter modules; this module is provider-neutral.
 from __future__ import annotations
 
 import subprocess
+import warnings
 from pathlib import Path
 
-from kagura_brain.core import BrainResult, _run, as_text, extract_block
+import pytest
+
+from kagura_brain.core import (
+    BrainResult,
+    _run,
+    as_text,
+    byo_inject_env,
+    extract_block,
+)
 
 
 class _Proc:
@@ -164,6 +173,60 @@ class TestRun:
         assert captured["kwargs"]["cwd"] == Path("/repo")
         assert captured["kwargs"]["timeout"] == 42
 
+    def test_injects_env_after_scrub(self, monkeypatch) -> None:
+        # scrub→inject order is load-bearing: a key that lives under a denied
+        # prefix AND is re-supplied by the caller must end up with the CALLER's
+        # value — the ambient one is stripped first, then the caller value is
+        # injected. Injecting before the scrub would let the deny loop strip the
+        # caller's own value (it shares the prefix), reopening the override hole.
+        monkeypatch.setenv("FOO_BASE_URL", "https://evil.example/v1")
+        captured: dict = {}
+
+        def _capture(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        _run(
+            ["tool"],
+            deny_prefixes=("FOO_",),
+            inject_env={"FOO_BASE_URL": "https://good.example/v1"},
+        )
+        assert captured["env"]["FOO_BASE_URL"] == "https://good.example/v1"
+
+    def test_inject_env_none_is_noop(self, monkeypatch) -> None:
+        monkeypatch.setenv("KEEP_ME", "v")
+        captured: dict = {}
+
+        def _capture(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        _run(["tool"], inject_env=None)
+        assert captured["env"]["KEEP_ME"] == "v"
+
+    def test_inject_only_adds_supplied_keys(self, monkeypatch) -> None:
+        # A denied-prefix key the caller does NOT re-supply stays stripped even
+        # when other keys are injected — injection is surgical, not a blanket
+        # re-import of the ambient environment.
+        monkeypatch.setenv("FOO_BASE_URL", "https://evil.example/v1")
+        monkeypatch.setenv("FOO_MODEL", "ambient-model")
+        captured: dict = {}
+
+        def _capture(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        _run(
+            ["tool"],
+            deny_prefixes=("FOO_",),
+            inject_env={"FOO_BASE_URL": "https://good.example/v1"},
+        )
+        assert captured["env"]["FOO_BASE_URL"] == "https://good.example/v1"
+        assert "FOO_MODEL" not in captured["env"]
+
     def test_decodes_output_as_utf8_with_replacement(self, monkeypatch) -> None:
         captured: dict = {}
 
@@ -202,3 +265,58 @@ class TestRun:
         res = _run(["tool"])
         assert res.stdout == "" and res.stderr == ""
         assert res.detail() == "timed out"
+
+
+class TestByoInjectEnv:
+    """The shared BYO-endpoint env builder used by both adapters.
+
+    Centralizes the credential-injection security rules in one tested place:
+    both-or-neither (a half-configured BYO mode is an error, not a silent
+    fallback), a non-https warning (the caller is shipping prompt/code context
+    off-box), and a ``None`` result when BYO is not requested at all. The
+    returned mapping is injected AFTER ``_run``'s deny-set scrub (see
+    ``TestRun.test_injects_env_after_scrub``), so only these explicit values —
+    never the ambient environment — reach the child.
+    """
+
+    def test_neither_returns_none(self) -> None:
+        assert byo_inject_env(None, None, url_key="U", token_key="T") is None
+
+    def test_both_returns_mapped_env(self) -> None:
+        assert byo_inject_env(
+            "https://good.example/v1", "tok", url_key="U", token_key="T"
+        ) == {"U": "https://good.example/v1", "T": "tok"}
+
+    def test_endpoint_without_token_raises(self) -> None:
+        with pytest.raises(ValueError):
+            byo_inject_env("https://good.example/v1", None, url_key="U", token_key="T")
+
+    def test_token_without_endpoint_raises(self) -> None:
+        with pytest.raises(ValueError):
+            byo_inject_env(None, "tok", url_key="U", token_key="T")
+
+    def test_empty_string_endpoint_counts_as_unsupplied(self) -> None:
+        # An empty string (e.g. os.environ.get of an unset-to-empty var) is
+        # "not supplied", not a valid endpoint — half-configured ⇒ ValueError,
+        # never a silently-injected empty value.
+        with pytest.raises(ValueError):
+            byo_inject_env("", "tok", url_key="U", token_key="T")
+
+    def test_empty_string_api_key_counts_as_unsupplied(self) -> None:
+        with pytest.raises(ValueError):
+            byo_inject_env("https://good.example/v1", "", url_key="U", token_key="T")
+
+    def test_both_empty_strings_return_none(self) -> None:
+        # Both falsy ⇒ BYO not requested; the default scrub path stands.
+        assert byo_inject_env("", "", url_key="U", token_key="T") is None
+
+    def test_non_https_endpoint_warns(self) -> None:
+        with pytest.warns(UserWarning):
+            byo_inject_env("http://plain.example/v1", "tok", url_key="U", token_key="T")
+
+    def test_https_endpoint_does_not_warn(self) -> None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning becomes an exception
+            assert byo_inject_env(
+                "https://secure.example/v1", "tok", url_key="U", token_key="T"
+            ) == {"U": "https://secure.example/v1", "T": "tok"}

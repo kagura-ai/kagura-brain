@@ -20,7 +20,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+import warnings
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +65,56 @@ def as_text(value: bytes | str | None) -> str:
     return value or ""
 
 
+def byo_inject_env(
+    endpoint: str | None,
+    api_key: str | None,
+    *,
+    url_key: str,
+    token_key: str,
+) -> dict[str, str] | None:
+    """Build the explicit "bring-your-own endpoint" env to inject AFTER the scrub.
+
+    Issue #2: routing a brain CLI at a *caller-chosen* endpoint (Ollama Cloud /
+    any compatible gateway) is the deliberate inverse of the subscription-auth
+    scrub. The endpoint + token are mapped to the provider's env vars
+    (``url_key`` / ``token_key``) and returned for :func:`_run` to inject *after*
+    the deny-set sweep, so only these explicit, caller-supplied values reach the
+    child — an ambient (inherited) override under the same prefix is still
+    stripped. The caller owns the trust decision: a BYO endpoint ships the
+    prompt + code context to a third party.
+
+    Rules:
+
+    - **Both-or-neither.** ``endpoint`` and ``api_key`` must be supplied
+      together. A half-configured BYO mode is a ``ValueError``, never a silent
+      fall-back to subscription auth (that would mask a routing mistake). An
+      empty string counts as *not supplied* — a caller passing
+      ``api_key=os.environ.get("KEY")`` for an unset-to-empty var gets a clear
+      ``ValueError`` at this boundary, not an empty token injected into the
+      child where the CLI fails with an opaque auth error.
+    - **Neither → ``None``.** BYO was not requested; the caller passes ``None``
+      to ``_run``'s ``inject_env`` and the default scrub stands unchanged.
+    - **Non-https → warn.** A plaintext endpoint ships context in the clear; emit
+      a :class:`UserWarning` (not an error — local gateways may be plain http).
+    """
+    if not endpoint and not api_key:
+        return None
+    if not endpoint or not api_key:
+        raise ValueError(
+            "BYO-endpoint mode requires both endpoint and api_key "
+            "(a half-configured or empty endpoint will not silently fall back "
+            "to subscription auth)"
+        )
+    if not endpoint.startswith("https://"):
+        warnings.warn(
+            f"BYO endpoint {endpoint!r} is not https:// — prompt and code "
+            "context will be sent to it in the clear",
+            UserWarning,
+            stacklevel=2,
+        )
+    return {url_key: endpoint, token_key: api_key}
+
+
 def _run(
     argv: Sequence[str],
     *,
@@ -71,6 +122,7 @@ def _run(
     timeout: int = _DEFAULT_TIMEOUT_S,
     deny_exact: Sequence[str] = (),
     deny_prefixes: Sequence[str] = (),
+    inject_env: Mapping[str, str] | None = None,
 ) -> BrainResult:
     """Run one headless CLI subprocess with a scrubbed child env.
 
@@ -81,6 +133,13 @@ def _run(
     for the ``--`` prompt separator). ``OSError`` is deliberately NOT caught —
     callers verify launchability via doctor first; it also surfaces a
     non-existent ``cwd`` (``FileNotFoundError``), not only a missing binary.
+
+    ``inject_env`` (issue #2) sets caller-supplied vars *after* the deny-set
+    sweep, so a deliberate BYO endpoint/token wins while ambient overrides under
+    the same prefix stay stripped. The order is load-bearing: injecting before
+    the scrub would let the deny loop strip the caller's own values (they live
+    under the denied prefix). Only the keys in ``inject_env`` are re-added —
+    every other denied key stays removed.
     """
     child_env = os.environ.copy()
     deny_exact_set = set(deny_exact)
@@ -88,6 +147,9 @@ def _run(
     for key in list(child_env):
         if key in deny_exact_set or (prefixes and key.startswith(prefixes)):
             child_env.pop(key, None)
+    # Inject AFTER the scrub — see the docstring's load-bearing-order note.
+    if inject_env:
+        child_env.update(inject_env)
     try:
         proc = subprocess.run(
             list(argv),

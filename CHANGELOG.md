@@ -26,6 +26,20 @@ committed 0.1.0 baseline.
   `--dangerously-bypass-approvals-and-sandbox` are opt-in, neither loosened by
   default. Reuses `verdict` and `extract_block` unchanged; the `-o`/`--output-schema`
   result protocol is deferred as a follow-up (parity kept for now).
+- BYO endpoint mode (opt-in) for both adapters (#2): `claude.invoke()` and
+  `codex.invoke()` accept `endpoint` + `api_key` to deliberately route at a
+  caller-chosen endpoint (Ollama Cloud / any compatible gateway). The pair is
+  injected (`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` for Claude,
+  `OPENAI_BASE_URL`/`OPENAI_API_KEY` for Codex) **after** the deny-set scrub via
+  the new `core._run(inject_env=...)` seam and the shared `core.byo_inject_env`
+  helper, so only explicit caller-supplied values reach the child while ambient
+  `*_BASE_URL` overrides stay stripped (the default subscription path is
+  unchanged). Both-or-neither (`ValueError` on a half-configured pair); a
+  non-https endpoint emits a `UserWarning`. Codex adds `local_provider`
+  (`ollama`|`lmstudio`) for a local `--oss --local-provider` backend (no env
+  override; mutually exclusive with `endpoint`/`api_key`) and the
+  `codex.OLLAMA_CLOUD_ENDPOINT` preset (alias `endpoint="ollama-cloud"`). No
+  Claude-side Ollama preset — Ollama Cloud is OpenAI-, not Anthropic-, compatible.
 
 ### Changed
 - `brain.invoke()` → `claude.invoke()` — the Claude adapter now lives in

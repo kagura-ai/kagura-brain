@@ -81,6 +81,41 @@ means the bogus key leaked into the child (scrub regression); a success that
 reaches the decoy host means the endpoint override was not stripped. Either is a
 release blocker.
 
+### BYO endpoint (issue #2) — opt-in routing still beats the ambient decoy
+
+After touching the BYO inject seam (`core.byo_inject_env` / `_run`'s
+`inject_env`), also confirm that an **explicit** caller endpoint wins over the
+ambient decoy — i.e. the scrub→inject order holds end-to-end. With the same decoy
+env still exported above, point Codex at a real OpenAI-compatible endpoint
+(e.g. Ollama Cloud) via the opt-in args and confirm it reaches *that* endpoint,
+not the decoy:
+
+```bash
+# Requires a real Ollama Cloud (or other OpenAI-compatible) key.
+export OLLAMA_CLOUD_API_KEY="…"   # your real key, NOT a decoy
+
+uv run python - <<'PY'
+import os
+from kagura_brain import codex
+
+res = codex.invoke(
+    "Reply with exactly: PONG",
+    endpoint="ollama-cloud",                 # alias → https://ollama.com/v1
+    api_key=os.environ["OLLAMA_CLOUD_API_KEY"],
+)
+ok = res.returncode == 0 and not res.timed_out and "PONG" in res.stdout
+print(f"codex BYO: rc={res.returncode} -> {'PASS' if ok else 'FAIL'}")
+if not ok:
+    print(f"  stdout: {res.stdout[:200]!r}")
+    print(f"  stderr: {res.stderr[:200]!r}")
+PY
+```
+
+`PASS` proves the explicit endpoint/token were injected *after* the scrub (the
+ambient `OPENAI_BASE_URL=https://decoy.invalid/v1` decoy was stripped, then
+overridden by the caller value). A `FAIL` that reaches `decoy.invalid` means the
+inject ran before the scrub (order regression) — a release blocker.
+
 ## Workflow
 
 1. Branch from `main`: `git checkout -b {issue}-{type}/{description}`

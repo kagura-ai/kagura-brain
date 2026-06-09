@@ -193,6 +193,141 @@ class TestSubscriptionAuthParity:
         assert env["HOME"] == "/home/dev"
 
 
+class TestByoEndpoint:
+    """Issue #2 — explicit, opt-in BYO endpoint routing for the Codex adapter.
+
+    ``endpoint=`` + ``api_key=`` inject ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY``
+    AFTER the ``OPENAI_*``/``CODEX_*`` scrub, so a caller-supplied endpoint wins
+    while ambient overrides stay stripped. ``endpoint="ollama-cloud"`` is a
+    convenience alias for the OpenAI-compatible Ollama Cloud endpoint.
+    """
+
+    def test_injects_caller_endpoint_and_api_key(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", endpoint="https://gw.example/v1", api_key="sk-byo")
+        env = captured["env"]
+        assert env["OPENAI_BASE_URL"] == "https://gw.example/v1"
+        assert env["OPENAI_API_KEY"] == "sk-byo"
+
+    def test_caller_endpoint_overrides_ambient(self, monkeypatch) -> None:
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://evil.example/v1")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", endpoint="https://good.example/v1", api_key="sk-byo")
+        assert captured["env"]["OPENAI_BASE_URL"] == "https://good.example/v1"
+
+    def test_ollama_cloud_alias_resolves_to_endpoint_constant(
+        self, monkeypatch
+    ) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", endpoint="ollama-cloud", api_key="sk-byo")
+        assert codex.OLLAMA_CLOUD_ENDPOINT == "https://ollama.com/v1"
+        assert captured["env"]["OPENAI_BASE_URL"] == codex.OLLAMA_CLOUD_ENDPOINT
+
+    def test_endpoint_without_api_key_raises(self) -> None:
+        with pytest.raises(ValueError):
+            invoke("idea", endpoint="https://good.example/v1")
+
+    def test_api_key_without_endpoint_raises(self) -> None:
+        with pytest.raises(ValueError):
+            invoke("idea", api_key="sk-byo")
+
+    def test_default_path_strips_all_openai(self, monkeypatch) -> None:
+        # No endpoint → subscription-auth parity unchanged: OPENAI_* stripped,
+        # nothing injected.
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://evil.example/v1")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-stale")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "OPENAI_BASE_URL" not in captured["env"]
+        assert "OPENAI_API_KEY" not in captured["env"]
+
+
+class TestLocalProvider:
+    """Issue #2 — Codex ``--oss --local-provider`` local passthrough.
+
+    For a LOCAL ollama/lmstudio backend Codex needs no env override (no deny-set
+    conflict); it is purely an argv passthrough. It is mutually exclusive with
+    the cloud BYO endpoint mode (env override) — passing both is contradictory.
+    """
+
+    def test_local_provider_adds_oss_flags(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", local_provider="ollama")
+        argv = captured["argv"]
+        assert "--oss" in argv
+        assert "--local-provider" in argv and "ollama" in argv
+        # Flags precede the "--" separator.
+        assert argv.index("--local-provider") < argv.index("--")
+
+    def test_lmstudio_is_accepted(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", local_provider="lmstudio")
+        assert "lmstudio" in captured["argv"]
+
+    def test_invalid_local_provider_raises(self) -> None:
+        with pytest.raises(ValueError):
+            invoke("idea", local_provider="bogus")
+
+    def test_local_provider_and_endpoint_are_mutually_exclusive(self) -> None:
+        with pytest.raises(ValueError):
+            invoke(
+                "idea",
+                local_provider="ollama",
+                endpoint="https://good.example/v1",
+                api_key="sk-byo",
+            )
+
+    def test_local_provider_still_scrubs_openai(self, monkeypatch) -> None:
+        # Local passthrough injects nothing, so the OPENAI_*/CODEX_* scrub is
+        # unchanged — an ambient endpoint override is still stripped.
+        monkeypatch.setenv("OPENAI_BASE_URL", "https://evil.example/v1")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", local_provider="ollama")
+        assert "OPENAI_BASE_URL" not in captured["env"]
+
+
 class TestRuntimeSeam:
     def test_forwards_cwd_and_timeout(self, monkeypatch) -> None:
         captured: dict = {}

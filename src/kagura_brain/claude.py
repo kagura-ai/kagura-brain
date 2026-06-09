@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, extract_block
+from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, byo_inject_env, extract_block
 
 __all__ = ["BrainResult", "extract_block", "invoke", "mcp_args"]
 
@@ -64,15 +64,41 @@ def invoke(
     timeout: int = _DEFAULT_TIMEOUT_S,
     mcp_config: str | None = None,
     allowed_tools: Sequence[str] = (),
+    endpoint: str | None = None,
+    api_key: str | None = None,
 ) -> BrainResult:
     """Run one headless ``claude -p`` on Claude Code subscription auth.
 
     Strips every ``ANTHROPIC_*`` env var (the ``_AUTH_OVERRIDE_PREFIXES`` sweep)
     from the child env via :func:`kagura_brain.core._run` so a stale credential
     or endpoint override cannot win over the subscription login.
+
+    **BYO endpoint (issue #2, opt-in).** Pass ``endpoint`` + ``api_key`` together
+    to deliberately route at a caller-chosen Anthropic-compatible gateway: they
+    are injected as ``ANTHROPIC_BASE_URL`` / ``ANTHROPIC_AUTH_TOKEN`` *after* the
+    scrub, so only these explicit values reach the child — an ambient
+    ``ANTHROPIC_BASE_URL`` is still stripped. With neither, the default
+    subscription-auth path is byte-for-byte unchanged. The token maps to
+    ``ANTHROPIC_AUTH_TOKEN`` (not ``ANTHROPIC_API_KEY``) — the var Claude Code
+    uses for gateway auth. Supplying only one of the pair raises ``ValueError``;
+    a non-https endpoint warns (context goes off-box in the clear). Note: Ollama
+    Cloud is OpenAI-compatible, so it has no built-in preset here — supply your
+    own Anthropic-compatible gateway URL.
     """
+    inject_env = byo_inject_env(
+        endpoint,
+        api_key,
+        url_key="ANTHROPIC_BASE_URL",
+        token_key="ANTHROPIC_AUTH_TOKEN",
+    )
     # ``-p``/``--print`` is a boolean flag and the prompt is positional, so a
     # prompt beginning with ``-`` would be parsed as an option. The ``--``
     # separator (after the MCP flags) forces it to be the prompt.
     argv = ["claude", "-p", *mcp_args(mcp_config, allowed_tools), "--", prompt]
-    return _run(argv, cwd=cwd, timeout=timeout, deny_prefixes=_AUTH_OVERRIDE_PREFIXES)
+    return _run(
+        argv,
+        cwd=cwd,
+        timeout=timeout,
+        deny_prefixes=_AUTH_OVERRIDE_PREFIXES,
+        inject_env=inject_env,
+    )

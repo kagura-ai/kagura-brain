@@ -22,10 +22,17 @@ from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, extract_block
 
 __all__ = ["BrainResult", "extract_block", "invoke", "mcp_args"]
 
-# Credential env vars that would override Claude Code subscription auth if a
-# stale value is inherited (notably from a surrounding Claude Code session).
-# Stripped from the child env so the subscription login always wins (#34).
-_AUTH_OVERRIDE_ENV = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+# Env vars that would override Claude Code subscription auth if a stale value is
+# inherited (notably from a surrounding Claude Code session). The whole
+# ``ANTHROPIC_*`` prefix is stripped from the child env so the subscription login
+# always wins: ``ANTHROPIC_API_KEY``/``ANTHROPIC_AUTH_TOKEN`` (credentials, #34)
+# and ``ANTHROPIC_BASE_URL`` (which Claude Code honors for gateway routing — an
+# inherited value would silently redirect subscription traffic to a foreign
+# endpoint, the "T2" exfiltration vector, #4). It is a *prefix* sweep, not a
+# fixed tuple — mirroring the codex adapter — so an unknown future override var
+# under the prefix cannot leak through. Deliberate BYO-endpoint routing is a
+# separate, explicit opt-in (tracked in #2), not an ambiently-inherited value.
+_AUTH_OVERRIDE_PREFIXES = ("ANTHROPIC_",)
 
 
 def mcp_args(mcp_config: str | None, allowed_tools: Sequence[str] = ()) -> list[str]:
@@ -60,12 +67,12 @@ def invoke(
 ) -> BrainResult:
     """Run one headless ``claude -p`` on Claude Code subscription auth.
 
-    Strips the credential env vars in ``_AUTH_OVERRIDE_ENV`` from the child env
-    (via :func:`kagura_brain.core._run`) so a stale value cannot override the
-    subscription login.
+    Strips every ``ANTHROPIC_*`` env var (the ``_AUTH_OVERRIDE_PREFIXES`` sweep)
+    from the child env via :func:`kagura_brain.core._run` so a stale credential
+    or endpoint override cannot win over the subscription login.
     """
     # ``-p``/``--print`` is a boolean flag and the prompt is positional, so a
     # prompt beginning with ``-`` would be parsed as an option. The ``--``
     # separator (after the MCP flags) forces it to be the prompt.
     argv = ["claude", "-p", *mcp_args(mcp_config, allowed_tools), "--", prompt]
-    return _run(argv, cwd=cwd, timeout=timeout, deny_exact=_AUTH_OVERRIDE_ENV)
+    return _run(argv, cwd=cwd, timeout=timeout, deny_prefixes=_AUTH_OVERRIDE_PREFIXES)

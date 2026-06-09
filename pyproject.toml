@@ -24,9 +24,11 @@ classifiers = [
 # NOTE: axis-2 (Claude Code driving) lib — deliberately does NOT depend on
 # kagura-memory. The memory axis lives in the SDK; keeping this dependency-free
 # of memory makes the orthogonal-axes split structural (no cycle, no inversion).
-dependencies = [
-    "pydantic>=2.7",
-]
+# No runtime dependencies: every module under ``src/kagura_brain/`` is stdlib-only
+# (``BrainResult`` is a ``@dataclass``). pydantic was declared but never imported,
+# so it was dropped (#3) — this keeps installs light and works on source-only /
+# no-Rust-toolchain build environments (no ``pydantic-core`` wheel needed).
+dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-cov>=6.0", "mypy>=1.10", "ruff>=0.5"]

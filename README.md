@@ -59,8 +59,8 @@ pip install kagura-brain
 # or: uv add kagura-brain
 ```
 
-Requires Python 3.11+. The only runtime dependency is `pydantic` — by design
-this package depends on **no** memory package (see the axis split above).
+Requires Python 3.11+. It has **no** runtime dependencies (stdlib-only) — and by
+design depends on **no** memory package (see the axis split above).
 
 ## Status
 

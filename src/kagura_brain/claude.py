@@ -23,17 +23,29 @@ from .doctor import CheckResult, check_binary
 
 __all__ = ["BrainResult", "CheckResult", "check", "extract_block", "invoke", "mcp_args"]
 
-# Env vars that would override Claude Code subscription auth if a stale value is
-# inherited (notably from a surrounding Claude Code session). The whole
-# ``ANTHROPIC_*`` prefix is stripped from the child env so the subscription login
-# always wins: ``ANTHROPIC_API_KEY``/``ANTHROPIC_AUTH_TOKEN`` (credentials, #34)
-# and ``ANTHROPIC_BASE_URL`` (which Claude Code honors for gateway routing — an
-# inherited value would silently redirect subscription traffic to a foreign
-# endpoint, the "T2" exfiltration vector, #4). It is a *prefix* sweep, not a
-# fixed tuple — mirroring the codex adapter — so an unknown future override var
-# under the prefix cannot leak through. Deliberate BYO-endpoint routing is a
-# separate, explicit opt-in (tracked in #2), not an ambiently-inherited value.
-_AUTH_OVERRIDE_PREFIXES = ("ANTHROPIC_",)
+# Env-var prefixes stripped from the child so a value inherited from the parent
+# (notably a surrounding Claude Code session) cannot override the subscription
+# login. Both whole prefixes are swept — not a fixed key tuple, mirroring the
+# codex adapter — so an unknown future override var under either prefix cannot
+# leak through (fail-secure):
+#
+# - ``ANTHROPIC_*`` — ``ANTHROPIC_API_KEY``/``ANTHROPIC_AUTH_TOKEN`` (credentials,
+#   #34) and ``ANTHROPIC_BASE_URL`` (gateway routing — an inherited value silently
+#   redirects subscription traffic to a foreign endpoint, the "T2" exfil vector, #4).
+# - ``CLAUDE_*`` — Claude Code also honors these (#11). ``CLAUDE_CODE_USE_BEDROCK``
+#   / ``CLAUDE_CODE_USE_VERTEX`` silently switch ``claude -p`` from subscription
+#   auth to a Bedrock/Vertex IAM path; ``CLAUDE_CONFIG_DIR`` relocates the auth dir
+#   (the ``CODEX_HOME`` analog). The whole prefix is swept on purpose: benign
+#   ``CLAUDE_CODE_*`` vars (e.g. the ``CLAUDE_CODE_ENTRYPOINT`` telemetry tag) are
+#   dropped too — that is the fail-secure cost, and is preferred over a narrow
+#   ``CLAUDE_CODE_USE_*`` allow-list that a future auth var could slip past. Do NOT
+#   re-add a benign ``CLAUDE_*`` passthrough by narrowing this sweep; a caller that
+#   genuinely needs one must inject it explicitly (the #2 ``inject_env`` opt-in).
+#
+# Deliberate BYO-endpoint routing is a separate, explicit opt-in (#2) that injects
+# ``ANTHROPIC_AUTH_TOKEN``/``ANTHROPIC_BASE_URL`` AFTER this sweep — it never sets a
+# ``CLAUDE_*`` var, so it is unaffected by the wider sweep.
+_AUTH_OVERRIDE_PREFIXES = ("ANTHROPIC_", "CLAUDE_")
 
 
 def mcp_args(mcp_config: str | None, allowed_tools: Sequence[str] = ()) -> list[str]:
@@ -70,9 +82,11 @@ def invoke(
 ) -> BrainResult:
     """Run one headless ``claude -p`` on Claude Code subscription auth.
 
-    Strips every ``ANTHROPIC_*`` env var (the ``_AUTH_OVERRIDE_PREFIXES`` sweep)
-    from the child env via :func:`kagura_brain.core._run` so a stale credential
-    or endpoint override cannot win over the subscription login.
+    Strips every ``ANTHROPIC_*`` and ``CLAUDE_*`` env var (the
+    ``_AUTH_OVERRIDE_PREFIXES`` sweep) from the child env via
+    :func:`kagura_brain.core._run` so a stale credential, endpoint override, or
+    Bedrock/Vertex routing flag (``CLAUDE_CODE_USE_BEDROCK``/``_USE_VERTEX``, #11)
+    cannot win over the subscription login.
 
     **BYO endpoint (issue #2, opt-in).** Pass ``endpoint`` + ``api_key`` together
     to deliberately route at a caller-chosen Anthropic-compatible gateway: they

@@ -146,10 +146,12 @@ class TestSubscriptionAuthParity:
         assert "ANTHROPIC_SOME_FUTURE_OVERRIDE" not in captured["env"]
 
     def test_preserves_unrelated_env(self, monkeypatch) -> None:
-        # The scrub must be surgical — non-ANTHROPIC vars (incl. CLAUDE_CODE_*,
-        # a different prefix) survive into the child env.
+        # The scrub must be surgical — vars outside the ANTHROPIC_/CLAUDE_ auth
+        # namespaces (PATH, HOME, …) survive into the child env. (CLAUDE_CODE_*
+        # is now scrubbed too — see test_strips_claude_code_use_bedrock — so it
+        # is no longer an example of a "surviving" var.)
         monkeypatch.setenv("PATH", "/usr/bin")
-        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", "cli")
+        monkeypatch.setenv("HOME", "/home/dev")
         captured: dict = {}
 
         def _run(*a, **k):
@@ -159,7 +161,51 @@ class TestSubscriptionAuthParity:
         monkeypatch.setattr(subprocess, "run", _run)
         invoke("idea")
         assert captured["env"].get("PATH") == "/usr/bin"
-        assert captured["env"].get("CLAUDE_CODE_ENTRYPOINT") == "cli"
+        assert captured["env"].get("HOME") == "/home/dev"
+
+    def test_strips_claude_code_use_bedrock(self, monkeypatch) -> None:
+        # An ambient CLAUDE_CODE_USE_BEDROCK=1 would silently switch the headless
+        # child from Claude Code subscription auth to a Bedrock IAM path (#11) —
+        # the CLAUDE_* analog of the ANTHROPIC_BASE_URL re-route. It must be
+        # scrubbed so the subscription login always wins.
+        monkeypatch.setenv("CLAUDE_CODE_USE_BEDROCK", "1")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "CLAUDE_CODE_USE_BEDROCK" not in captured["env"]
+
+    def test_strips_claude_code_use_vertex(self, monkeypatch) -> None:
+        # Same re-route via Vertex/GCP (#11).
+        monkeypatch.setenv("CLAUDE_CODE_USE_VERTEX", "1")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "CLAUDE_CODE_USE_VERTEX" not in captured["env"]
+
+    def test_strips_unknown_claude_prefix_var(self, monkeypatch) -> None:
+        # Fail-secure: a future/unknown CLAUDE_* var (e.g. CLAUDE_CONFIG_DIR, or
+        # a not-yet-shipped auth flag) must also be swept by the prefix, not just
+        # the historically-known keys — mirroring the ANTHROPIC_ prefix sweep.
+        monkeypatch.setenv("CLAUDE_SOME_FUTURE_OVERRIDE", "foreign")
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "CLAUDE_SOME_FUTURE_OVERRIDE" not in captured["env"]
 
 
 class TestByoEndpoint:

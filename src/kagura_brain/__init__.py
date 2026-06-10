@@ -14,8 +14,8 @@ Surface (built incrementally, TDD, one consumer per PR):
 - ``core``    — provider-agnostic seam: ``BrainResult``, ``_run`` (subprocess +
                 per-adapter env-scrub + timeout + utf-8 decode), ``as_text``,
                 ``extract_block``.
-- ``claude``  — ``invoke()`` headless ``claude -p`` launcher (``ANTHROPIC_*``
-                deny-set, ``--``-guarded prompt, ``mcp_args``).
+- ``claude``  — ``invoke()`` headless ``claude -p`` launcher (``ANTHROPIC_*`` /
+                ``CLAUDE_*`` deny-set, ``--``-guarded prompt, ``mcp_args``).
 - ``codex``   — ``invoke()`` headless ``codex exec`` launcher (``OPENAI_*`` /
                 ``CODEX_*`` prefix scrub, ``--``-guarded prompt, opt-in sandbox).
 - ``verdict`` — canonical ``PROCEED`` set + exit-code map (contract only).

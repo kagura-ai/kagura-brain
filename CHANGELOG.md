@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.4.0) - 2026-06-10
+
+Wires MCP into the codex adapter, so `select("codex")` now advertises
+`supports_mcp=True` and an engineer/planner codex run keeps in-task memory
+grounding. The selector forwards the same `mcp_config` to both backends; the
+codex adapter owns the mechanism difference, so the consumer needs no rework.
+
+### Changed
+- `codex.invoke` now accepts `mcp_config` (a claude-format `.mcp.json` path) and
+  translates each `mcpServers` entry into a per-call `-c mcp_servers.<name>=<TOML>`
+  config override — codex's equivalent of Claude Code's `--mcp-config` (codex has
+  no `--mcp-config` flag). Keys with no codex analog (e.g. claude's
+  `"type": "stdio"`) are dropped. `allowed_tools` is accepted for selector
+  signature parity but **not forwarded** — codex has no per-call tool allow-list
+  and gates MCP tool calls through its sandbox/approval model instead (pass
+  `sandbox=` / `bypass_approvals=True` for unattended MCP use).
+- `selector`: `select("codex")` is now `supports_mcp=True`, and
+  `BrainHandle.invoke` forwards `mcp_config`/`allowed_tools` to the codex adapter
+  (previously dropped, logged once). The `_warn_codex_mcp_unsupported` drop-warning
+  is removed. `BrainHandle.__post_init__` now requires `supports_mcp=True` for
+  both `"claude"` and `"codex"`.
+
 ## [0.3.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.3.0) - 2026-06-10
 
 Promotes the brain-backend selection seam from the consumers into the library.

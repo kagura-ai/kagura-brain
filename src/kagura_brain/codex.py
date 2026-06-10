@@ -19,9 +19,12 @@ unknown future override var under those prefixes cannot leak through
 Routing Codex at a *caller-chosen* endpoint (Ollama Cloud / BYO gateway) is the
 deliberate inverse of this scrub and is tracked separately (issue #2), not here.
 
-**MCP differs from Claude.** Codex manages MCP servers via ``codex mcp`` /
-``~/.codex/config.toml`` (persistent), not per-call ``--mcp-config`` /
-``--allowedTools`` flags — so there is no ``mcp_args`` equivalent here. Sandbox /
+**MCP differs from Claude.** Codex has no per-call ``--mcp-config`` /
+``--allowedTools`` flags; it configures MCP via ``~/.codex/config.toml`` /
+``codex mcp`` or per-call ``-c mcp_servers.<name>=<TOML>`` overrides. So
+``invoke`` accepts the same ``mcp_config`` path as the Claude adapter but
+*translates* it (:func:`_mcp_overrides`) into those ``-c`` overrides, while
+``allowed_tools`` has no codex analog and is accepted-but-not-forwarded. Sandbox /
 approval is **opt-in**: pass ``sandbox=`` to set ``-s/--sandbox``, or
 ``bypass_approvals=True`` for ``--dangerously-bypass-approvals-and-sandbox``; the
 default invocation loosens neither.
@@ -35,7 +38,10 @@ protocol on the Codex side — deferred as a follow-up; parity is kept for now.
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, byo_inject_env, extract_block
 from .doctor import CheckResult, check_binary
@@ -78,6 +84,81 @@ _AUTH_OVERRIDE_PREFIXES = ("OPENAI_", "CODEX_")
 # Valid `-s/--sandbox` policies per `codex exec --help` (Codex 0.133.0).
 _SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 
+# Keys of a claude-format ``.mcp.json`` server entry that map onto a codex
+# ``[mcp_servers.<name>]`` table. Other keys (e.g. claude's ``"type": "stdio"``)
+# have no codex analog and are dropped so they can't trip ``--strict-config``.
+_MCP_TRANSLATED_KEYS = ("command", "args", "env", "url")
+
+
+def _toml_str(s: str) -> str:
+    """Serialize a Python ``str`` as a TOML basic string (minimal escaping)."""
+    escaped = (
+        s.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\t", "\\t")
+        .replace("\r", "\\r")
+    )
+    return f'"{escaped}"'
+
+
+def _toml_key(key: str) -> str:
+    """A TOML key segment: bare when safe, otherwise a quoted key."""
+    if key and all(c.isalnum() or c in "_-" for c in key):
+        return key
+    return _toml_str(key)
+
+
+def _toml_inline(value: Any) -> str:
+    """Serialize a JSON-ish value as inline TOML (str / bool / int / list / dict).
+
+    ``str`` is checked before the ``Sequence`` branch (``str`` *is* a ``Sequence``)
+    so it serializes as a basic string, not a char array.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return _toml_str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, Mapping):
+        body = ", ".join(
+            f"{_toml_key(str(k))} = {_toml_inline(v)}" for k, v in value.items()
+        )
+        return "{ " + body + " }"
+    if isinstance(value, Sequence):
+        return "[" + ", ".join(_toml_inline(v) for v in value) + "]"
+    # Fallback: stringify anything unexpected so we never emit invalid TOML.
+    return _toml_str(str(value))
+
+
+def _mcp_overrides(mcp_config: str | None) -> list[str]:
+    """Translate a claude-format ``.mcp.json`` into ``codex exec`` argv.
+
+    Codex has no ``--mcp-config`` flag; instead ``-c <dotted.path>=<value>`` layers
+    a config override whose value is parsed as TOML. For each entry in the file's
+    ``mcpServers`` map this emits one ``-c mcp_servers.<name>={...}`` carrying the
+    codex-relevant keys (:data:`_MCP_TRANSLATED_KEYS`). Returns ``[]`` when
+    ``mcp_config`` is falsy, when the file has no ``mcpServers`` map, or for any
+    server entry that contributes no translatable key.
+    """
+    if not mcp_config:
+        return []
+    with open(mcp_config, encoding="utf-8") as fh:
+        data: Any = json.load(fh)
+    servers = data.get("mcpServers") if isinstance(data, Mapping) else None
+    if not isinstance(servers, Mapping):
+        return []
+    overrides: list[str] = []
+    for name, spec in servers.items():
+        if not isinstance(spec, Mapping):
+            continue
+        table = {k: spec[k] for k in _MCP_TRANSLATED_KEYS if spec.get(k)}
+        if not table:
+            continue
+        overrides += ["-c", f"mcp_servers.{_toml_key(str(name))}={_toml_inline(table)}"]
+    return overrides
+
 
 def invoke(
     prompt: str,
@@ -89,6 +170,8 @@ def invoke(
     endpoint: str | None = None,
     api_key: str | None = None,
     local_provider: str | None = None,
+    mcp_config: str | None = None,
+    allowed_tools: Sequence[str] = (),
 ) -> BrainResult:
     """Run one headless ``codex exec`` on Codex (ChatGPT subscription) auth.
 
@@ -112,7 +195,22 @@ def invoke(
     Passing ``local_provider`` together with ``endpoint``/``api_key`` is a
     ``ValueError`` (a local backend and a remote endpoint are contradictory).
     With none of the three, the default subscription-auth path is unchanged.
+
+    **MCP wiring.** ``mcp_config`` is a path to a claude-format ``.mcp.json``; its
+    ``mcpServers`` are translated (:func:`_mcp_overrides`) into per-call
+    ``-c mcp_servers.<name>=<TOML>`` config overrides — codex's equivalent of
+    Claude Code's ``--mcp-config``. With ``mcp_config=None`` no overrides are
+    added and the argv is unchanged. ``allowed_tools`` is **accepted for selector
+    signature parity but intentionally not forwarded**: codex has no per-call
+    tool allow-list (claude's ``--allowedTools``); it gates MCP tool calls through
+    its sandbox/approval model instead, so the caller controls that via
+    ``sandbox`` / ``bypass_approvals``. Note: an MCP-server-using turn run under
+    the default (no sandbox/bypass) may block on approval — pass ``sandbox=`` or
+    ``bypass_approvals=True`` for unattended use. (A real codex-exec MCP round-trip
+    is a manual smoke step; CI mocks the subprocess.)
     """
+    # allowed_tools has no codex analog (see docstring); accepted for parity only.
+    del allowed_tools
     if sandbox is not None and bypass_approvals:
         # --dangerously-bypass-approvals-and-sandbox overrides any sandbox
         # policy, so accepting both would hand back an argv whose --sandbox is
@@ -159,7 +257,7 @@ def invoke(
     # The prompt is positional; ``exec`` also has subcommands (resume/review/help)
     # and a prompt beginning with ``-`` would parse as an option. The ``--``
     # separator forces the prompt to be the prompt in both cases.
-    argv = ["codex", "exec", *flags, "--", prompt]
+    argv = ["codex", "exec", *flags, *_mcp_overrides(mcp_config), "--", prompt]
     return _run(
         argv,
         cwd=cwd,

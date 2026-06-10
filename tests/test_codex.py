@@ -14,6 +14,7 @@ smoke is a manual/local step (see CONTRIBUTING / PR notes).
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -393,3 +394,90 @@ class TestCheck:
         res = check()
         assert res.name == "codex"
         assert res.ok is False
+
+
+class TestMcpConfig:
+    """codex wires MCP by translating a claude-format ``.mcp.json`` into
+    ``-c mcp_servers.<name>=<TOML>`` overrides on the ``codex exec`` argv (codex
+    has no ``--mcp-config`` flag; ``-c key=value`` parses the value as TOML)."""
+
+    def _capture_argv(self, monkeypatch) -> dict:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        return captured
+
+    def _write(self, tmp_path: Path, data: dict) -> str:
+        p = tmp_path / ".mcp.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        return str(p)
+
+    def test_translates_server_to_codex_override(self, monkeypatch, tmp_path) -> None:
+        cfg = self._write(
+            tmp_path,
+            {
+                "mcpServers": {
+                    "kagura-memory": {
+                        "type": "stdio",
+                        "command": "kagura-mcp",
+                        "args": ["--profile", "default"],
+                    }
+                }
+            },
+        )
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        argv = captured["argv"]
+        joined = " ".join(argv)
+        assert "-c" in argv
+        assert "mcp_servers.kagura-memory" in joined
+        assert "kagura-mcp" in joined
+        assert "--profile" in joined and "default" in joined
+        # codex config has no "type" key — it must NOT leak into the override.
+        assert "stdio" not in joined
+        # overrides precede the "--" prompt separator.
+        assert argv.index("-c") < argv.index("--")
+
+    def test_no_mcp_config_emits_no_overrides(self, monkeypatch) -> None:
+        captured = self._capture_argv(monkeypatch)
+        invoke("p")
+        assert "-c" not in captured["argv"]
+        assert "mcp_servers" not in " ".join(captured["argv"])
+
+    def test_allowed_tools_accepted_but_not_forwarded(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        # codex has no per-call allow-list (claude's --allowedTools); the param is
+        # accepted for selector signature parity but must never reach the argv.
+        cfg = self._write(tmp_path, {"mcpServers": {"m": {"command": "x"}}})
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg, allowed_tools=("mcp__kagura-memory__recall",))
+        argv = captured["argv"]
+        assert "--allowedTools" not in argv
+        assert "mcp__kagura-memory__recall" not in " ".join(argv)
+
+    def test_multiple_servers_each_get_an_override(self, monkeypatch, tmp_path) -> None:
+        cfg = self._write(
+            tmp_path,
+            {"mcpServers": {"a": {"command": "x"}, "b": {"command": "y"}}},
+        )
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        argv = captured["argv"]
+        assert argv.count("-c") == 2
+        joined = " ".join(argv)
+        assert "mcp_servers.a" in joined and "mcp_servers.b" in joined
+
+    def test_server_env_is_translated(self, monkeypatch, tmp_path) -> None:
+        cfg = self._write(
+            tmp_path,
+            {"mcpServers": {"m": {"command": "x", "env": {"FOO": "bar"}}}},
+        )
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        joined = " ".join(captured["argv"])
+        assert "env" in joined and "FOO" in joined and "bar" in joined

@@ -55,8 +55,8 @@ of these set, the default subscription-auth path is byte-for-byte unchanged.
 ### Provider-neutral selector
 
 When a consumer supports **more than one backend**, `select` confines the
-`claude`/`codex` dispatch — and the "codex has no per-call MCP" rule — to the
-library, so each consumer no longer re-encodes it
+`claude`/`codex` dispatch — and the per-provider MCP wiring — to the library, so
+each consumer no longer re-encodes it
 ([#14](https://github.com/kagura-ai/kagura-brain/issues/14)):
 
 ```python
@@ -64,11 +64,13 @@ import os
 
 from kagura_brain import select, BRAIN_API_KEY_ENV
 
-# "claude" (default) → supports_mcp=True; "codex" → supports_mcp=False.
+# "claude" (default) and "codex" are both supports_mcp=True.
 handle = select(cfg.backend, endpoint=cfg.endpoint, api_key=os.environ.get(BRAIN_API_KEY_ENV))
 handle.invoke("…prompt…", cwd=repo, mcp_config=".mcp.json", allowed_tools=MEMORY_TOOLS)
-# claude → forwards mcp_config/allowed_tools; codex → drops them (logs once),
-# since codex wires MCP out-of-band. endpoint/api_key forward to both.
+# Same mcp_config/allowed_tools to both; the adapter owns the mechanism:
+# claude → --mcp-config/--allowedTools per call; codex → translates the .mcp.json
+# into -c mcp_servers.* overrides and ignores allowed_tools (no codex analog).
+# endpoint/api_key forward to both.
 ```
 
 `select` takes **primitives, never a consumer's `Config`**, and never reads the
@@ -134,7 +136,7 @@ Public surface is built incrementally under TDD, one consumer migration per PR:
 - [x] `codex.invoke()` — headless `codex exec` launcher (`OPENAI_*`/`CODEX_*` prefix scrub, `--`-guarded prompt, opt-in sandbox, BYO `endpoint`/`api_key` + `local_provider`)
 - [x] `verdict` — `PROCEED` set + exit-code map (contract only)
 - [x] `doctor` — provider-neutral check primitives (`check_binary`, `check_auth`, `check_endpoint`, `aggregate`) + presence-only `claude.check()`/`codex.check()` wrappers
-- [x] `select` — provider-neutral `BrainHandle` selector over the adapters (`supports_mcp` capability, codex MCP-drop confined to the library, `BRAIN_API_KEY_ENV` name)
+- [x] `select` — provider-neutral `BrainHandle` selector over the adapters (`supports_mcp` capability; per-provider MCP wiring confined to the library — claude per-call flags, codex `-c mcp_servers.*`; `BRAIN_API_KEY_ENV` name)
 
 ## Development
 

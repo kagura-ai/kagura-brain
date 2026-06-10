@@ -9,12 +9,13 @@ subprocess/env/timeout/decode seam lives in ``kagura_brain.core``.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from kagura_brain.claude import invoke, mcp_args
+from kagura_brain.claude import check, invoke, mcp_args
 
 
 class _Proc:
@@ -241,6 +242,24 @@ class TestByoEndpoint:
         invoke("idea")
         assert "ANTHROPIC_BASE_URL" not in captured["env"]
         assert "ANTHROPIC_AUTH_TOKEN" not in captured["env"]
+
+
+class TestCheck:
+    """Presence-only pre-flight wrapper (issue #9). Auth is NOT probed here —
+    Claude Code has no clean non-interactive auth check."""
+
+    def test_present_is_ok(self, monkeypatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/claude")
+        res = check()
+        assert res.name == "claude"
+        assert res.ok is True
+        assert "/usr/local/bin/claude" in res.detail
+
+    def test_absent_is_fail(self, monkeypatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        res = check()
+        assert res.name == "claude"
+        assert res.ok is False
 
 
 class TestMcpArgs:

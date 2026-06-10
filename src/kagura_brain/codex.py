@@ -38,8 +38,16 @@ from __future__ import annotations
 from pathlib import Path
 
 from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, byo_inject_env, extract_block
+from .doctor import CheckResult, check_binary
 
-__all__ = ["BrainResult", "OLLAMA_CLOUD_ENDPOINT", "extract_block", "invoke"]
+__all__ = [
+    "BrainResult",
+    "CheckResult",
+    "OLLAMA_CLOUD_ENDPOINT",
+    "check",
+    "extract_block",
+    "invoke",
+]
 
 # Convenience preset for the BYO-endpoint mode (issue #2): Ollama Cloud exposes
 # an OpenAI-compatible API, so pass ``endpoint="ollama-cloud"`` (the alias) or
@@ -159,3 +167,16 @@ def invoke(
         deny_prefixes=_AUTH_OVERRIDE_PREFIXES,
         inject_env=inject_env,
     )
+
+
+def check() -> CheckResult:
+    """Presence check for the ``codex`` CLI — the pre-flight companion to
+    :func:`invoke` (mirrors how ``invoke`` wraps ``core._run``).
+
+    Presence only (``shutil.which`` via :func:`kagura_brain.doctor.check_binary`).
+    Auth ("logged in") is intentionally NOT probed: ``codex`` has no clean,
+    non-interactive auth check, and a ``codex exec`` round-trip would run a real,
+    billable turn. For tools that *do* expose a clean auth exit code use
+    :func:`kagura_brain.doctor.check_auth` instead.
+    """
+    return check_binary("codex")

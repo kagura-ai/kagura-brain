@@ -15,13 +15,14 @@ smoke is a manual/local step (see CONTRIBUTING / PR notes).
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from kagura_brain import codex
-from kagura_brain.codex import invoke
+from kagura_brain.codex import check, invoke
 
 
 class _Proc:
@@ -374,3 +375,21 @@ class TestVersionCanary:
         # a frozen literal (mirrors test_import's version-shape check).
         version = codex._CODEX_VERIFIED_VERSION
         assert re.fullmatch(r"\d+\.\d+\.\d+", version), version
+
+
+class TestCheck:
+    """Presence-only pre-flight wrapper (issue #9). Auth is NOT probed here —
+    codex has no clean non-interactive auth check."""
+
+    def test_present_is_ok(self, monkeypatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/local/bin/codex")
+        res = check()
+        assert res.name == "codex"
+        assert res.ok is True
+        assert "/usr/local/bin/codex" in res.detail
+
+    def test_absent_is_fail(self, monkeypatch) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        res = check()
+        assert res.name == "codex"
+        assert res.ok is False

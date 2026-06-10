@@ -19,7 +19,9 @@ Surface (built incrementally, TDD, one consumer per PR):
 - ``codex``   — ``invoke()`` headless ``codex exec`` launcher (``OPENAI_*`` /
                 ``CODEX_*`` prefix scrub, ``--``-guarded prompt, opt-in sandbox).
 - ``verdict`` — canonical ``PROCEED`` set + exit-code map (contract only).
-- ``doctor``  — reusable environment-check primitives (git/claude/gh/ollama) [planned].
+- ``doctor``  — provider-neutral environment-check primitives (``check_binary`` /
+                ``check_auth`` / ``check_endpoint`` / ``aggregate``); the adapters
+                add presence-only ``claude.check()`` / ``codex.check()`` wrappers.
 
 Both adapters strip their provider's credential/endpoint overrides from the
 child env so the CLI's **subscription** login wins.
@@ -30,8 +32,8 @@ kagura-memory-python-sdk instead.
 
 from __future__ import annotations
 
-from . import claude, codex, core, verdict
+from . import claude, codex, core, doctor, verdict
 
 __version__ = "0.1.0"
 
-__all__ = ["__version__", "claude", "codex", "core", "verdict"]
+__all__ = ["__version__", "claude", "codex", "core", "doctor", "verdict"]

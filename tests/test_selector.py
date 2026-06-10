@@ -58,6 +58,13 @@ class TestSelect:
         with pytest.raises(Exception):
             handle.backend = "codex"  # type: ignore[misc]
 
+    def test_api_key_absent_from_repr(self) -> None:
+        # The BYO key must not appear in repr() — a handle in a log line or
+        # exception traceback would otherwise leak it (CSO gate2 finding, #14).
+        handle = select("codex", endpoint="ollama-cloud", api_key="SECRET123")
+        assert "SECRET123" not in repr(handle)
+        assert handle.api_key == "SECRET123"  # still stored/usable
+
 
 class TestClaudeHandleInvoke:
     def test_forwards_mcp_config_and_allowed_tools(self, monkeypatch) -> None:

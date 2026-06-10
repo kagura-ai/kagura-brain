@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.2.0) - 2026-06-10
+
+Adds the `doctor` toolchain-check layer (the last unchecked primitive on the
+roadmap) and closes a subscription-auth scrub gap in the Claude adapter. Both
+land on top of `v0.1.0`; the security fix was tracked under a separate
+`v0.1.1 — Security patch` milestone but ships here since it merged to `main`
+alongside the `doctor` work.
+
+### Added
+- `doctor` — provider-neutral, stdlib-only environment-check primitives a
+  consuming harness calls to verify its toolchain *before* driving a brain
+  adapter (the inverse of `core._run`, which lets launch failures propagate):
+  `check_binary` (presence via `shutil.which`), `check_auth` (exit-code auth
+  check that catches `OSError`/`TimeoutExpired` into a fail result, with a short
+  health-check timeout), `check_endpoint` (opt-in HTTP reachability, http/https
+  only, no credentials attached), and `aggregate` (tri-state `ok`/`degraded`/
+  `fail` with a caller-specified `required` set). Adapters add presence-only
+  `claude.check()` / `codex.check()` wrappers — the intuitive consumer entry
+  point, mirroring how `invoke()` wraps `core._run`
+  ([#9](https://github.com/kagura-ai/kagura-brain/issues/9)).
+
+### Security
+- `claude` adapter now scrubs the whole `CLAUDE_*` env prefix in addition to
+  `ANTHROPIC_*`. An ambient `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_VERTEX`
+  inherited from the parent environment was passing through to the headless
+  `claude -p` child and silently switching it from Claude Code subscription auth
+  to a Bedrock/Vertex IAM path (the `CLAUDE_*` analog of the `ANTHROPIC_BASE_URL`
+  re-route). The whole-prefix sweep is fail-secure — an unknown future `CLAUDE_*`
+  auth flag cannot slip through — and also drops `CLAUDE_CONFIG_DIR`. The
+  opt-in BYO-endpoint path is unaffected
+  ([#11](https://github.com/kagura-ai/kagura-brain/issues/11)).
+
 ## [0.1.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.1.0) - 2026-06-09
 
 First release of `kagura-brain` — the provider-neutral "brain" axis for Kagura

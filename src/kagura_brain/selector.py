@@ -94,8 +94,7 @@ class BrainHandle:
     def __post_init__(self) -> None:
         if self.backend not in _BACKENDS:
             raise ValueError(
-                f"unknown backend {self.backend!r}; "
-                f"expected one of {sorted(_BACKENDS)}"
+                f"unknown backend {self.backend!r}; expected one of {sorted(_BACKENDS)}"
             )
         expected_mcp = _BACKENDS[self.backend][1]
         if self.supports_mcp != expected_mcp:

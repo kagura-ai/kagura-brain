@@ -60,6 +60,8 @@ library, so each consumer no longer re-encodes it
 ([#14](https://github.com/kagura-ai/kagura-brain/issues/14)):
 
 ```python
+import os
+
 from kagura_brain import select, BRAIN_API_KEY_ENV
 
 # "claude" (default) → supports_mcp=True; "codex" → supports_mcp=False.

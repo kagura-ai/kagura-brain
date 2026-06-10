@@ -75,6 +75,12 @@ class BrainHandle:
 
     Built by :func:`select`. ``invoke`` dispatches on ``supports_mcp`` so the
     "codex has no per-call MCP" rule lives here once, not in every consumer.
+
+    ``BrainHandle`` is exported and directly constructable, so it fails closed in
+    :meth:`__post_init__`: an unknown ``backend`` — or a ``supports_mcp`` that
+    contradicts that backend's known capability — raises ``ValueError`` at
+    construction, so a hand-built or deserialized handle can never silently
+    mis-route or suppress/mis-fire the codex MCP-drop warning.
     """
 
     backend: str
@@ -84,6 +90,19 @@ class BrainHandle:
     # handle that lands in a log line or exception traceback cannot leak it (CSO
     # gate2 finding, #14). The value is still stored and forwarded to the adapter.
     api_key: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.backend not in _BACKENDS:
+            raise ValueError(
+                f"unknown backend {self.backend!r}; "
+                f"expected one of {sorted(_BACKENDS)}"
+            )
+        expected_mcp = _BACKENDS[self.backend][1]
+        if self.supports_mcp != expected_mcp:
+            raise ValueError(
+                f"supports_mcp={self.supports_mcp!r} contradicts backend "
+                f"{self.backend!r} (expected {expected_mcp!r})"
+            )
 
     def invoke(
         self,

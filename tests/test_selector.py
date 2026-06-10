@@ -12,6 +12,7 @@ primitives the consumer supplies — the library never reads the env itself.
 from __future__ import annotations
 
 import logging
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -55,8 +56,29 @@ class TestSelect:
 
     def test_handle_is_frozen(self) -> None:
         handle = select("claude")
-        with pytest.raises(Exception):
+        with pytest.raises(FrozenInstanceError):
             handle.backend = "codex"  # type: ignore[misc]
+
+
+class TestBrainHandleFailsClosed:
+    """BrainHandle is exported/constructable, so it validates at construction."""
+
+    def test_direct_construction_unknown_backend_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown backend"):
+            BrainHandle(backend="gemini", supports_mcp=True)
+
+    def test_direct_construction_inconsistent_supports_mcp_raises(self) -> None:
+        # claude is MCP-capable; claiming otherwise must not build a handle that
+        # could suppress the codex MCP-drop warning or mis-route on dispatch.
+        with pytest.raises(ValueError, match="contradicts backend"):
+            BrainHandle(backend="claude", supports_mcp=False)
+        with pytest.raises(ValueError, match="contradicts backend"):
+            BrainHandle(backend="codex", supports_mcp=True)
+
+    def test_valid_direct_construction_is_allowed(self) -> None:
+        handle = BrainHandle(backend="codex", supports_mcp=False)
+        assert handle.backend == "codex"
+        assert handle.supports_mcp is False
 
     def test_api_key_absent_from_repr(self) -> None:
         # The BYO key must not appear in repr() — a handle in a log line or

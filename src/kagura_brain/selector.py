@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -80,7 +80,10 @@ class BrainHandle:
     backend: str
     supports_mcp: bool
     endpoint: str | None = None
-    api_key: str | None = None
+    # ``repr=False`` keeps a BYO key out of the default dataclass ``__repr__`` so a
+    # handle that lands in a log line or exception traceback cannot leak it (CSO
+    # gate2 finding, #14). The value is still stored and forwarded to the adapter.
+    api_key: str | None = field(default=None, repr=False)
 
     def invoke(
         self,

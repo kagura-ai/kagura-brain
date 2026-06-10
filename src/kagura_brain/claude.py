@@ -19,8 +19,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .core import BrainResult, _DEFAULT_TIMEOUT_S, _run, byo_inject_env, extract_block
+from .doctor import CheckResult, check_binary
 
-__all__ = ["BrainResult", "extract_block", "invoke", "mcp_args"]
+__all__ = ["BrainResult", "CheckResult", "check", "extract_block", "invoke", "mcp_args"]
 
 # Env vars that would override Claude Code subscription auth if a stale value is
 # inherited (notably from a surrounding Claude Code session). The whole
@@ -102,3 +103,16 @@ def invoke(
         deny_prefixes=_AUTH_OVERRIDE_PREFIXES,
         inject_env=inject_env,
     )
+
+
+def check() -> CheckResult:
+    """Presence check for the ``claude`` CLI — the pre-flight companion to
+    :func:`invoke` (mirrors how ``invoke`` wraps ``core._run``).
+
+    Presence only (``shutil.which`` via :func:`kagura_brain.doctor.check_binary`).
+    Auth ("logged in") is intentionally NOT probed: Claude Code has no clean,
+    non-interactive auth check, and a ``claude -p`` round-trip would run a real,
+    billable turn. For tools that *do* expose a clean auth exit code (e.g.
+    ``gh auth status``) use :func:`kagura_brain.doctor.check_auth` instead.
+    """
+    return check_binary("claude")

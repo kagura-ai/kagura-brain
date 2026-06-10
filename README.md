@@ -109,7 +109,7 @@ Public surface is built incrementally under TDD, one consumer migration per PR:
 - [x] `claude.invoke()` — headless `claude -p` launcher (`ANTHROPIC_*` deny-set, `--`-guarded prompt, `mcp_args`, opt-in BYO `endpoint`/`api_key`)
 - [x] `codex.invoke()` — headless `codex exec` launcher (`OPENAI_*`/`CODEX_*` prefix scrub, `--`-guarded prompt, opt-in sandbox, BYO `endpoint`/`api_key` + `local_provider`)
 - [x] `verdict` — `PROCEED` set + exit-code map (contract only)
-- [ ] `doctor` — git/claude/gh/ollama/reachability check primitives
+- [x] `doctor` — provider-neutral check primitives (`check_binary`, `check_auth`, `check_endpoint`, `aggregate`) + presence-only `claude.check()`/`codex.check()` wrappers
 
 ## Development
 

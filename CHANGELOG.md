@@ -4,6 +4,29 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.3.0) - 2026-06-10
+
+Promotes the brain-backend selection seam from the consumers into the library.
+Every consumer that supports more than one backend used to map a backend name →
+adapter + endpoint/api_key and re-encode the "codex has no per-call MCP" rule
+itself (kagura-engineer's `run/brain_select.py`, kagura-planner #11). At N=2
+consumers that generic core belongs in the library that already owns the
+adapters, the `BrainResult` seam, and the `doctor` helpers.
+
+### Added
+- `selector` — provider-neutral `select(backend, *, endpoint=, api_key=) ->
+  BrainHandle` over the existing adapters (`select`, `BrainHandle`,
+  `BRAIN_API_KEY_ENV` re-exported at the top level). `"claude"` (default) →
+  `supports_mcp=True`; `"codex"` → `supports_mcp=False`; an unknown backend
+  raises `ValueError`. The frozen `BrainHandle.invoke(prompt, *, cwd, timeout,
+  mcp_config=None, allowed_tools=())` confines the dispatch: a claude handle
+  forwards `mcp_config` / `allowed_tools` (+ endpoint/api_key for a BYO gateway);
+  a codex handle **drops** them — codex wires MCP out-of-band — and logs the drop
+  once per process. `BRAIN_API_KEY_ENV = "KAGURA_BRAIN_API_KEY"` is the standard
+  env-var *name* all consumers agree on; the library never reads the env itself
+  (the consumer passes `api_key=` in), keeping it config-agnostic, secret-free,
+  and dependency-free ([#14](https://github.com/kagura-ai/kagura-brain/issues/14)).
+
 ## [0.2.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.2.0) - 2026-06-10
 
 Adds the `doctor` toolchain-check layer (the last unchecked primitive on the

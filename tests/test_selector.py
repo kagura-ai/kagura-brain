@@ -1,32 +1,23 @@
 """Tests for kagura_brain.selector — the provider-neutral brain selector (#14).
 
 ``select(backend, *, endpoint=, api_key=)`` returns a frozen ``BrainHandle``
-that confines the claude/codex dispatch + the "codex has no per-call MCP" rule
-to the library, so consumers stop re-encoding it. The MCP-drop is gated on the
-handle's *capability* (``supports_mcp``): a claude handle forwards ``mcp_config``
-/ ``allowed_tools`` to the adapter; a codex handle drops them (logging once)
-since codex wires MCP out-of-band. endpoint/api_key are
-primitives the consumer supplies — the library never reads the env itself.
+that confines the claude/codex dispatch to the library, so consumers stop
+re-encoding it. ``invoke`` forwards the same ``mcp_config`` / ``allowed_tools``
+to whichever adapter ``backend`` names — both backends are MCP-capable, but the
+adapter owns the per-provider mechanism (claude per-call flags; codex translates
+to ``-c mcp_servers.*`` overrides and ignores ``allowed_tools``). endpoint/api_key
+are primitives the consumer supplies — the library never reads the env itself.
 """
 
 from __future__ import annotations
 
-import logging
 from dataclasses import FrozenInstanceError
 
 import pytest
 
 from kagura_brain import BRAIN_API_KEY_ENV, BrainHandle, select
-from kagura_brain import claude, codex, selector
+from kagura_brain import claude, codex
 from kagura_brain.core import BrainResult
-
-
-@pytest.fixture(autouse=True)
-def _reset_codex_drop_log() -> None:
-    """The codex-MCP-drop log fires once per process; clear the guard so each
-    test that exercises it sees a fresh first-time log."""
-    selector._warn_codex_mcp_unsupported.cache_clear()
-
 
 _SENTINEL = BrainResult(0, "ok", "")
 
@@ -40,10 +31,10 @@ class TestSelect:
     def test_claude_backend_supports_mcp(self) -> None:
         assert select("claude").supports_mcp is True
 
-    def test_codex_backend_does_not_support_mcp(self) -> None:
+    def test_codex_backend_supports_mcp(self) -> None:
         handle = select("codex")
         assert handle.backend == "codex"
-        assert handle.supports_mcp is False
+        assert handle.supports_mcp is True
 
     def test_unknown_backend_raises_value_error(self) -> None:
         with pytest.raises(ValueError):
@@ -68,17 +59,17 @@ class TestBrainHandleFailsClosed:
             BrainHandle(backend="gemini", supports_mcp=True)
 
     def test_direct_construction_inconsistent_supports_mcp_raises(self) -> None:
-        # claude is MCP-capable; claiming otherwise must not build a handle that
-        # could suppress the codex MCP-drop warning or mis-route on dispatch.
+        # Both backends are MCP-capable; a handle advertising otherwise must not
+        # be constructable (it could mis-advertise the capability to a consumer).
         with pytest.raises(ValueError, match="contradicts backend"):
             BrainHandle(backend="claude", supports_mcp=False)
         with pytest.raises(ValueError, match="contradicts backend"):
-            BrainHandle(backend="codex", supports_mcp=True)
+            BrainHandle(backend="codex", supports_mcp=False)
 
     def test_valid_direct_construction_is_allowed(self) -> None:
-        handle = BrainHandle(backend="codex", supports_mcp=False)
+        handle = BrainHandle(backend="codex", supports_mcp=True)
         assert handle.backend == "codex"
-        assert handle.supports_mcp is False
+        assert handle.supports_mcp is True
 
     def test_api_key_absent_from_repr(self) -> None:
         # The BYO key must not appear in repr() — a handle in a log line or
@@ -137,18 +128,24 @@ class TestClaudeHandleInvoke:
 
 
 class TestCodexHandleInvoke:
-    def test_drops_mcp_config_and_allowed_tools(self, monkeypatch) -> None:
+    def test_forwards_mcp_config_and_allowed_tools(self, monkeypatch) -> None:
+        # The selector forwards both to the codex adapter; the adapter (tested in
+        # test_codex.py) is responsible for translating mcp_config to -c overrides
+        # and ignoring allowed_tools. Here we only assert the selector forwards.
         captured: dict = {}
-        monkeypatch.setattr(
-            codex, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
-        )
+
+        def _invoke(prompt, **kwargs):
+            captured["kwargs"] = kwargs
+            return _SENTINEL
+
+        monkeypatch.setattr(codex, "invoke", _invoke)
         select("codex").invoke(
             "p",
             mcp_config="/repo/.mcp.json",
             allowed_tools=("mcp__kagura-memory__recall",),
         )
-        assert "mcp_config" not in captured
-        assert "allowed_tools" not in captured
+        assert captured["kwargs"]["mcp_config"] == "/repo/.mcp.json"
+        assert captured["kwargs"]["allowed_tools"] == ("mcp__kagura-memory__recall",)
 
     def test_forwards_endpoint_and_api_key(self, monkeypatch) -> None:
         captured: dict = {}
@@ -158,21 +155,6 @@ class TestCodexHandleInvoke:
         select("codex", endpoint="ollama-cloud", api_key="secret").invoke("p")
         assert captured["endpoint"] == "ollama-cloud"
         assert captured["api_key"] == "secret"
-
-    def test_logs_drop_once(self, monkeypatch, caplog) -> None:
-        monkeypatch.setattr(codex, "invoke", lambda prompt, **k: _SENTINEL)
-        handle = select("codex")
-        with caplog.at_level(logging.WARNING, logger="kagura_brain.selector"):
-            handle.invoke("p", mcp_config="/repo/.mcp.json")
-            handle.invoke("p", mcp_config="/repo/.mcp.json")
-        drops = [r for r in caplog.records if "mcp" in r.getMessage().lower()]
-        assert len(drops) == 1
-
-    def test_no_log_when_no_mcp_args(self, monkeypatch, caplog) -> None:
-        monkeypatch.setattr(codex, "invoke", lambda prompt, **k: _SENTINEL)
-        with caplog.at_level(logging.WARNING, logger="kagura_brain.selector"):
-            select("codex").invoke("p")
-        assert caplog.records == []
 
 
 class TestApiKeyEnvName:

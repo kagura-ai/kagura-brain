@@ -24,8 +24,10 @@ Surface (built incrementally, TDD, one consumer per PR):
                 add presence-only ``claude.check()`` / ``codex.check()`` wrappers.
 - ``selector``— provider-neutral ``select(backend, ...) -> BrainHandle`` over the
                 adapters; the handle confines the claude/codex dispatch + the
-                "codex has no per-call MCP" rule (``BRAIN_API_KEY_ENV`` name only,
-                no env read) so consumers stop re-encoding it.
+                per-provider MCP wiring (claude per-call flags, codex
+                ``-c mcp_servers.*`` overrides) to the library
+                (``BRAIN_API_KEY_ENV`` name only, no env read) so consumers stop
+                re-encoding it.
 
 Both adapters strip their provider's credential/endpoint overrides from the
 child env so the CLI's **subscription** login wins.
@@ -39,7 +41,7 @@ from __future__ import annotations
 from . import claude, codex, core, doctor, selector, verdict
 from .selector import BRAIN_API_KEY_ENV, BrainHandle, select
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "BRAIN_API_KEY_ENV",

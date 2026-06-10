@@ -14,6 +14,8 @@ smoke is a manual/local step (see CONTRIBUTING / PR notes).
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 import shutil
 import subprocess
@@ -393,3 +395,169 @@ class TestCheck:
         res = check()
         assert res.name == "codex"
         assert res.ok is False
+
+
+class TestMcpConfig:
+    """codex wires MCP by translating a claude-format ``.mcp.json`` into
+    ``-c mcp_servers.<name>=<TOML>`` overrides on the ``codex exec`` argv (codex
+    has no ``--mcp-config`` flag; ``-c key=value`` parses the value as TOML)."""
+
+    def _capture_argv(self, monkeypatch) -> dict:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        return captured
+
+    def _write(self, tmp_path: Path, data: dict) -> str:
+        p = tmp_path / ".mcp.json"
+        p.write_text(json.dumps(data), encoding="utf-8")
+        return str(p)
+
+    def test_translates_server_to_codex_override(self, monkeypatch, tmp_path) -> None:
+        cfg = self._write(
+            tmp_path,
+            {
+                "mcpServers": {
+                    "kagura-memory": {
+                        "type": "stdio",
+                        "command": "kagura-mcp",
+                        "args": ["--profile", "default"],
+                    }
+                }
+            },
+        )
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        argv = captured["argv"]
+        joined = " ".join(argv)
+        assert "-c" in argv
+        assert "mcp_servers.kagura-memory" in joined
+        assert "kagura-mcp" in joined
+        assert "--profile" in joined and "default" in joined
+        # codex config has no "type" key — it must NOT leak into the override.
+        assert "stdio" not in joined
+        # overrides precede the "--" prompt separator.
+        assert argv.index("-c") < argv.index("--")
+
+    def test_no_mcp_config_emits_no_overrides(self, monkeypatch) -> None:
+        captured = self._capture_argv(monkeypatch)
+        invoke("p")
+        assert "-c" not in captured["argv"]
+        assert "mcp_servers" not in " ".join(captured["argv"])
+
+    def test_allowed_tools_accepted_but_not_forwarded(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        # codex has no per-call allow-list (claude's --allowedTools); the param is
+        # accepted for selector signature parity but must never reach the argv.
+        cfg = self._write(tmp_path, {"mcpServers": {"m": {"command": "x"}}})
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg, allowed_tools=("mcp__kagura-memory__recall",))
+        argv = captured["argv"]
+        assert "--allowedTools" not in argv
+        assert "mcp__kagura-memory__recall" not in " ".join(argv)
+
+    def test_multiple_servers_each_get_an_override(self, monkeypatch, tmp_path) -> None:
+        cfg = self._write(
+            tmp_path,
+            {"mcpServers": {"a": {"command": "x"}, "b": {"command": "y"}}},
+        )
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        argv = captured["argv"]
+        assert argv.count("-c") == 2
+        joined = " ".join(argv)
+        assert "mcp_servers.a" in joined and "mcp_servers.b" in joined
+
+    def test_server_env_is_translated(self, monkeypatch, tmp_path) -> None:
+        cfg = self._write(
+            tmp_path,
+            {"mcpServers": {"m": {"command": "x", "env": {"FOO": "bar"}}}},
+        )
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        joined = " ".join(captured["argv"])
+        assert "env" in joined and "FOO" in joined and "bar" in joined
+
+    def test_present_empty_args_preserved_not_dropped(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        # Presence (k in spec), not truthiness: an empty args=[] is faithful config,
+        # not the same as "no args key", so it must survive translation.
+        cfg = self._write(tmp_path, {"mcpServers": {"m": {"command": "x", "args": []}}})
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        assert "args = []" in " ".join(captured["argv"])
+
+    def test_command_and_url_conflict_drops_url(self, monkeypatch, tmp_path) -> None:
+        # codex rejects a server table carrying both command (stdio) and url
+        # ("url is not supported for stdio"); the stdio command wins, url is dropped.
+        cfg = self._write(
+            tmp_path,
+            {"mcpServers": {"m": {"command": "x", "url": "https://e/mcp"}}},
+        )
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        joined = " ".join(captured["argv"])
+        assert "command" in joined
+        assert "url" not in joined
+
+    def test_url_only_remote_server_is_translated(self, monkeypatch, tmp_path) -> None:
+        # A url-only entry is a valid codex streamable_http server.
+        cfg = self._write(tmp_path, {"mcpServers": {"r": {"url": "https://e/mcp"}}})
+        captured = self._capture_argv(monkeypatch)
+        invoke("p", mcp_config=cfg)
+        assert "url" in " ".join(captured["argv"])
+
+    def test_missing_file_raises_valueerror_naming_path(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        self._capture_argv(monkeypatch)
+        missing = str(tmp_path / "nope.json")
+        with pytest.raises(ValueError, match="could not be read"):
+            invoke("p", mcp_config=missing)
+
+    def test_malformed_json_raises_valueerror(self, monkeypatch, tmp_path) -> None:
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not valid json", encoding="utf-8")
+        self._capture_argv(monkeypatch)
+        with pytest.raises(ValueError, match="could not be read"):
+            invoke("p", mcp_config=str(bad))
+
+
+class TestAllowedToolsWarning:
+    """codex has no per-call allow-list; allowed_tools is dropped with a once-per-
+    process warning (not silently) so a consumer isn't misled about confinement."""
+
+    def test_warns_once_when_allowed_tools_supplied(self, monkeypatch, caplog) -> None:
+        codex._warn_allowed_tools_dropped.cache_clear()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, "ok", ""))
+        with caplog.at_level(logging.WARNING, logger="kagura_brain.codex"):
+            invoke("p", allowed_tools=("t1",))
+            invoke("p", allowed_tools=("t2",))
+        warns = [r for r in caplog.records if "allowed_tools" in r.getMessage()]
+        assert len(warns) == 1
+
+    def test_no_warn_when_allowed_tools_empty(self, monkeypatch, caplog) -> None:
+        codex._warn_allowed_tools_dropped.cache_clear()
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Proc(0, "ok", ""))
+        with caplog.at_level(logging.WARNING, logger="kagura_brain.codex"):
+            invoke("p")
+        assert [r for r in caplog.records if "allowed_tools" in r.getMessage()] == []
+
+
+class TestTomlEscaping:
+    def test_control_chars_escaped_as_unicode(self) -> None:
+        out = codex._toml_str("a\x00b\x1bc\x7f")
+        assert "\x00" not in out and "\x1b" not in out and "\x7f" not in out
+        assert "\\u0000" in out and "\\u001b" in out and "\\u007f" in out
+
+    def test_quote_and_backslash_escaped(self) -> None:
+        assert codex._toml_str('a"b\\c') == '"a\\"b\\\\c"'
+
+    def test_newline_tab_use_short_escapes(self) -> None:
+        assert codex._toml_str("a\nb\tc") == '"a\\nb\\tc"'

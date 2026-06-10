@@ -8,11 +8,14 @@ library already owns the adapters, the :class:`~kagura_brain.core.BrainResult`
 seam, and the cross-consumer ``doctor`` helpers; a selector over its own adapters
 is the natural next API.
 
-:func:`select` returns a frozen :class:`BrainHandle` whose ``.invoke`` dispatches
-on its **capability** (``supports_mcp``), not on the backend name: a claude
-handle forwards ``mcp_config`` / ``allowed_tools`` to the adapter; a codex handle
-drops them (logging once) because codex wires MCP out-of-band
-(``codex mcp`` / ``~/.codex/config.toml``), not per call.
+:func:`select` returns a frozen :class:`BrainHandle` whose ``.invoke`` forwards
+``mcp_config`` / ``allowed_tools`` to the chosen adapter. Both backends are now
+MCP-capable, but the mechanism differs and the library hides that: the claude
+adapter passes ``--mcp-config`` / ``--allowedTools`` per call, while the codex
+adapter translates the same ``.mcp.json`` into ``-c mcp_servers.*`` config
+overrides (codex has no per-call ``allowed_tools`` analog, so it is accepted for
+parity but not forwarded). ``supports_mcp`` advertises that capability per
+backend.
 
 **Library stays pure (issue #14 design boundaries).**
 
@@ -21,16 +24,14 @@ drops them (logging once) because codex wires MCP out-of-band
 - *No env read / no secret handling.* The consumer reads
   :data:`BRAIN_API_KEY_ENV` (or wherever) and passes ``api_key=`` in; the library
   owns only the standard *name*. Keeps it memory-free / pure / trivially testable.
-- *Consumer owns its ``allowed_tools``.* The library knows *capabilities* (codex
-  can't MCP); the consumer supplies *which tools*.
+- *Consumer owns its ``allowed_tools``.* The library knows *capabilities*; the
+  consumer supplies *which tools*.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 
 from . import claude, codex
@@ -43,44 +44,32 @@ __all__ = ["BRAIN_API_KEY_ENV", "BrainHandle", "select"]
 # it and passes ``api_key=`` into :func:`select`), keeping this module pure.
 BRAIN_API_KEY_ENV = "KAGURA_BRAIN_API_KEY"
 
-_logger = logging.getLogger(__name__)
-
-# backend name → (adapter module, supports_mcp). The single source of truth for
-# both the valid-backend set and each backend's MCP capability.
+# backend name → supports_mcp capability. The single source of truth for both the
+# valid-backend set and each backend's advertised MCP capability. Both adapters
+# wire MCP (claude per-call, codex via translated `-c mcp_servers.*` overrides),
+# so both are True — kept as a per-backend flag so a future MCP-less backend can
+# opt out in one place. Dispatch is by backend *name* (``invoke`` calls
+# ``claude``/``codex`` directly to preserve the typed ``BrainResult`` under mypy
+# strict), so this maps only the capability, not the adapter module.
 _BACKENDS = {
-    "claude": (claude, True),
-    "codex": (codex, False),
+    "claude": True,
+    "codex": True,
 }
-
-
-@lru_cache(maxsize=1)
-def _warn_codex_mcp_unsupported() -> None:
-    """Log the codex MCP-drop exactly once per process.
-
-    A codex handle drops ``mcp_config`` / ``allowed_tools`` on every ``invoke``;
-    without a guard a per-call loop would spam an identical warning. ``lru_cache``
-    fires the body once and returns the cached ``None`` thereafter; tests reset it
-    via ``.cache_clear()``.
-    """
-    _logger.warning(
-        "codex backend has no per-call MCP wiring; dropping mcp_config/"
-        "allowed_tools (codex manages MCP out-of-band via `codex mcp` / "
-        "~/.codex/config.toml)"
-    )
 
 
 @dataclass(frozen=True)
 class BrainHandle:
     """A selected brain backend + its capability, with a uniform ``invoke``.
 
-    Built by :func:`select`. ``invoke`` dispatches on ``supports_mcp`` so the
-    "codex has no per-call MCP" rule lives here once, not in every consumer.
+    Built by :func:`select`. ``invoke`` forwards the same ``mcp_config`` /
+    ``allowed_tools`` to whichever adapter ``backend`` names, so each consumer
+    stops re-encoding the per-provider MCP mechanism.
 
     ``BrainHandle`` is exported and directly constructable, so it fails closed in
     :meth:`__post_init__`: an unknown ``backend`` — or a ``supports_mcp`` that
     contradicts that backend's known capability — raises ``ValueError`` at
     construction, so a hand-built or deserialized handle can never silently
-    mis-route or suppress/mis-fire the codex MCP-drop warning.
+    mis-route or advertise the wrong capability.
     """
 
     backend: str
@@ -96,7 +85,7 @@ class BrainHandle:
             raise ValueError(
                 f"unknown backend {self.backend!r}; expected one of {sorted(_BACKENDS)}"
             )
-        expected_mcp = _BACKENDS[self.backend][1]
+        expected_mcp = _BACKENDS[self.backend]
         if self.supports_mcp != expected_mcp:
             raise ValueError(
                 f"supports_mcp={self.supports_mcp!r} contradicts backend "
@@ -114,24 +103,21 @@ class BrainHandle:
     ) -> BrainResult:
         """Run one brain turn on this backend, returning its :class:`BrainResult`.
 
-        claude → forwards ``mcp_config`` + ``allowed_tools`` (+ stored
-        endpoint/api_key for a BYO gateway). codex → **drops**
-        ``mcp_config`` / ``allowed_tools`` (logging once via
-        :func:`_warn_codex_mcp_unsupported`) and forwards endpoint/api_key only.
-
-        The MCP-drop is gated on the ``supports_mcp`` *capability*; the adapter is
-        chosen by ``backend`` (the two axes are kept distinct so a future
-        MCP-capable backend would not be mis-routed to the claude adapter). The
-        per-adapter ``invoke`` is called directly rather than via the registry so
-        its typed ``BrainResult`` return is preserved under mypy strict.
+        ``mcp_config`` + ``allowed_tools`` (and the stored endpoint/api_key for a
+        BYO gateway) are forwarded to the chosen adapter. The adapter owns the
+        per-provider mechanism: claude passes ``--mcp-config`` / ``--allowedTools``
+        per call; codex translates ``mcp_config`` into ``-c mcp_servers.*``
+        overrides and ignores ``allowed_tools`` (no codex analog). The adapter is
+        chosen by ``backend`` and each ``invoke`` is called directly (not via the
+        registry) so its typed ``BrainResult`` return survives mypy strict.
         """
-        if not self.supports_mcp and (mcp_config or allowed_tools):
-            _warn_codex_mcp_unsupported()
         if self.backend == "codex":
             return codex.invoke(
                 prompt,
                 cwd=cwd,
                 timeout=timeout,
+                mcp_config=mcp_config,
+                allowed_tools=allowed_tools,
                 endpoint=self.endpoint,
                 api_key=self.api_key,
             )
@@ -154,19 +140,18 @@ def select(
 ) -> BrainHandle:
     """Select a brain backend and return its :class:`BrainHandle`.
 
-    ``"claude"`` (the default) → claude adapter, ``supports_mcp=True``;
-    ``"codex"`` → codex adapter, ``supports_mcp=False``. An unknown backend
+    ``"claude"`` (the default) and ``"codex"`` both map to ``supports_mcp=True``
+    (each adapter wires MCP its own way). An unknown backend
     raises ``ValueError``. ``endpoint`` / ``api_key`` are stored on the handle
     and forwarded to the adapter's ``invoke`` for a BYO gateway — the library
     never reads them from the env (see :data:`BRAIN_API_KEY_ENV`).
     """
     try:
-        _adapter, supports_mcp = _BACKENDS[backend]
+        supports_mcp = _BACKENDS[backend]
     except KeyError:
         raise ValueError(
             f"unknown backend {backend!r}; expected one of {sorted(_BACKENDS)}"
         ) from None
-    del _adapter  # capability is all select needs here; invoke picks the adapter
     return BrainHandle(
         backend=backend,
         supports_mcp=supports_mcp,

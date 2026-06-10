@@ -44,14 +44,16 @@ __all__ = ["BRAIN_API_KEY_ENV", "BrainHandle", "select"]
 # it and passes ``api_key=`` into :func:`select`), keeping this module pure.
 BRAIN_API_KEY_ENV = "KAGURA_BRAIN_API_KEY"
 
-# backend name → (adapter module, supports_mcp). The single source of truth for
-# both the valid-backend set and each backend's MCP capability. Both adapters
+# backend name → supports_mcp capability. The single source of truth for both the
+# valid-backend set and each backend's advertised MCP capability. Both adapters
 # wire MCP (claude per-call, codex via translated `-c mcp_servers.*` overrides),
-# so both advertise True — kept as a per-backend field so a future MCP-less
-# backend can opt out in one place.
+# so both are True — kept as a per-backend flag so a future MCP-less backend can
+# opt out in one place. Dispatch is by backend *name* (``invoke`` calls
+# ``claude``/``codex`` directly to preserve the typed ``BrainResult`` under mypy
+# strict), so this maps only the capability, not the adapter module.
 _BACKENDS = {
-    "claude": (claude, True),
-    "codex": (codex, True),
+    "claude": True,
+    "codex": True,
 }
 
 
@@ -83,7 +85,7 @@ class BrainHandle:
             raise ValueError(
                 f"unknown backend {self.backend!r}; expected one of {sorted(_BACKENDS)}"
             )
-        expected_mcp = _BACKENDS[self.backend][1]
+        expected_mcp = _BACKENDS[self.backend]
         if self.supports_mcp != expected_mcp:
             raise ValueError(
                 f"supports_mcp={self.supports_mcp!r} contradicts backend "
@@ -145,12 +147,11 @@ def select(
     never reads them from the env (see :data:`BRAIN_API_KEY_ENV`).
     """
     try:
-        _adapter, supports_mcp = _BACKENDS[backend]
+        supports_mcp = _BACKENDS[backend]
     except KeyError:
         raise ValueError(
             f"unknown backend {backend!r}; expected one of {sorted(_BACKENDS)}"
         ) from None
-    del _adapter  # capability is all select needs here; invoke picks the adapter
     return BrainHandle(
         backend=backend,
         supports_mcp=supports_mcp,

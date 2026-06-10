@@ -39,7 +39,9 @@ protocol on the Codex side — deferred as a follow-up; parity is kept for now.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping, Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -87,19 +89,54 @@ _SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 # Keys of a claude-format ``.mcp.json`` server entry that map onto a codex
 # ``[mcp_servers.<name>]`` table. Other keys (e.g. claude's ``"type": "stdio"``)
 # have no codex analog and are dropped so they can't trip ``--strict-config``.
+# ``command`` (stdio) and ``url`` (streamable_http) are mutually exclusive in a
+# codex server table — emitting both yields "url is not supported for stdio", so
+# a ``command`` entry wins and ``url`` is dropped for it (see :func:`_mcp_overrides`).
 _MCP_TRANSLATED_KEYS = ("command", "args", "env", "url")
+
+_logger = logging.getLogger(__name__)
+
+# Short TOML escapes for the control chars that have them; every other char below
+# U+0020 must be emitted as ``\uXXXX`` (a raw control char is illegal in a TOML
+# basic string and would abort codex's config parse).
+_TOML_SHORT_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\t": "\\t",
+    "\n": "\\n",
+    "\f": "\\f",
+    "\r": "\\r",
+}
+
+
+@lru_cache(maxsize=1)
+def _warn_allowed_tools_dropped() -> None:
+    """Warn once per process that ``allowed_tools`` is not enforced for codex.
+
+    Codex has no per-call tool allow-list (claude's ``--allowedTools``); it gates
+    MCP tool calls through its sandbox/approval model. ``invoke`` accepts
+    ``allowed_tools`` for selector signature parity but cannot forward it, so this
+    surfaces the capability gap at runtime instead of silently dropping it.
+    """
+    _logger.warning(
+        "codex has no per-call tool allow-list; the supplied allowed_tools is "
+        "ignored. Codex gates MCP tool calls via its sandbox/approval model — use "
+        "sandbox= / bypass_approvals= to control that."
+    )
 
 
 def _toml_str(s: str) -> str:
-    """Serialize a Python ``str`` as a TOML basic string (minimal escaping)."""
-    escaped = (
-        s.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\t", "\\t")
-        .replace("\r", "\\r")
-    )
-    return f'"{escaped}"'
+    """Serialize a Python ``str`` as a TOML basic string, escaping all control chars."""
+    out = []
+    for ch in s:
+        if ch in _TOML_SHORT_ESCAPES:
+            out.append(_TOML_SHORT_ESCAPES[ch])
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\u{ord(ch):04x}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
 
 
 def _toml_key(key: str) -> str:
@@ -135,17 +172,34 @@ def _toml_inline(value: Any) -> str:
 def _mcp_overrides(mcp_config: str | None) -> list[str]:
     """Translate a claude-format ``.mcp.json`` into ``codex exec`` argv.
 
-    Codex has no ``--mcp-config`` flag; instead ``-c <dotted.path>=<value>`` layers
-    a config override whose value is parsed as TOML. For each entry in the file's
-    ``mcpServers`` map this emits one ``-c mcp_servers.<name>={...}`` carrying the
-    codex-relevant keys (:data:`_MCP_TRANSLATED_KEYS`). Returns ``[]`` when
-    ``mcp_config`` is falsy, when the file has no ``mcpServers`` map, or for any
-    server entry that contributes no translatable key.
+    Codex has no ``--mcp-config`` flag. The per-call config channel is
+    ``-c <dotted.path>=<TOML value>``; this emits one
+    ``-c mcp_servers.<name>={...}`` per entry in the file's ``mcpServers`` map,
+    carrying the codex-relevant keys (:data:`_MCP_TRANSLATED_KEYS`). ``-c`` is the
+    *only* per-call channel that survives this adapter's env scrub: the
+    file/env-based handoff (``CODEX_HOME`` → a generated ``config.toml``) is
+    unavailable because ``_AUTH_OVERRIDE_PREFIXES`` strips ``CODEX_*`` to force the
+    subscription ``~/.codex``. Note these overrides *layer onto* that
+    ``~/.codex/config.toml``: a server whose name already exists there is merged
+    field-by-field, so a name clash with a different transport (e.g. an existing
+    streamable_http server of the same name) can produce an invalid hybrid that
+    codex rejects at config load — pick server names that don't collide.
+
+    ``command`` (stdio) and ``url`` (streamable_http) are mutually exclusive in a
+    codex server table; when an entry carries both, ``command`` wins and ``url`` is
+    dropped. Returns ``[]`` when ``mcp_config`` is falsy or has no ``mcpServers``
+    map. Raises ``ValueError`` (naming the path) when the file is missing or not
+    valid JSON — unlike the claude adapter, which hands the unread path to its CLI.
     """
     if not mcp_config:
         return []
-    with open(mcp_config, encoding="utf-8") as fh:
-        data: Any = json.load(fh)
+    try:
+        with open(mcp_config, encoding="utf-8") as fh:
+            data: Any = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"codex mcp_config {mcp_config!r} could not be read as JSON: {exc}"
+        ) from exc
     servers = data.get("mcpServers") if isinstance(data, Mapping) else None
     if not isinstance(servers, Mapping):
         return []
@@ -153,7 +207,13 @@ def _mcp_overrides(mcp_config: str | None) -> list[str]:
     for name, spec in servers.items():
         if not isinstance(spec, Mapping):
             continue
-        table = {k: spec[k] for k in _MCP_TRANSLATED_KEYS if spec.get(k)}
+        # Presence (``k in spec``), not truthiness, so a legitimately empty value
+        # (``args: []`` / ``env: {}``) is translated faithfully rather than dropped.
+        table = {k: spec[k] for k in _MCP_TRANSLATED_KEYS if k in spec}
+        # A stdio server (``command``) and a remote server (``url``) cannot coexist
+        # in one codex table; prefer the stdio launch and drop the conflicting url.
+        if "command" in table:
+            table.pop("url", None)
         if not table:
             continue
         overrides += ["-c", f"mcp_servers.{_toml_key(str(name))}={_toml_inline(table)}"]
@@ -200,17 +260,23 @@ def invoke(
     ``mcpServers`` are translated (:func:`_mcp_overrides`) into per-call
     ``-c mcp_servers.<name>=<TOML>`` config overrides — codex's equivalent of
     Claude Code's ``--mcp-config``. With ``mcp_config=None`` no overrides are
-    added and the argv is unchanged. ``allowed_tools`` is **accepted for selector
-    signature parity but intentionally not forwarded**: codex has no per-call
-    tool allow-list (claude's ``--allowedTools``); it gates MCP tool calls through
-    its sandbox/approval model instead, so the caller controls that via
+    added and the argv is unchanged. A missing or non-JSON ``mcp_config`` raises
+    ``ValueError`` (the claude adapter defers an unread path to its CLI; codex must
+    parse it to translate). ``allowed_tools`` is **accepted for selector signature
+    parity but not forwarded** — codex has no per-call tool allow-list (claude's
+    ``--allowedTools``); a non-empty value triggers a once-per-process warning so
+    the dropped confinement is visible rather than silent. Codex gates MCP tool
+    calls through its sandbox/approval model, so the caller controls that via
     ``sandbox`` / ``bypass_approvals``. Note: an MCP-server-using turn run under
     the default (no sandbox/bypass) may block on approval — pass ``sandbox=`` or
-    ``bypass_approvals=True`` for unattended use. (A real codex-exec MCP round-trip
-    is a manual smoke step; CI mocks the subprocess.)
+    ``bypass_approvals=True`` for unattended use. (The ``-c mcp_servers.*`` form is
+    verified against codex 0.133.0; CI mocks the subprocess.)
     """
-    # allowed_tools has no codex analog (see docstring); accepted for parity only.
-    del allowed_tools
+    # allowed_tools has no codex analog (see docstring); accepted for selector
+    # parity only. Warn once (rather than silently dropping) so a consumer relying
+    # on it for tool confinement isn't left with a false sense of enforcement.
+    if allowed_tools:
+        _warn_allowed_tools_dropped()
     if sandbox is not None and bypass_approvals:
         # --dangerously-bypass-approvals-and-sandbox overrides any sandbox
         # policy, so accepting both would hand back an argv whose --sandbox is

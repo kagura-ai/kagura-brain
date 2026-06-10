@@ -7,24 +7,39 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.4.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.4.0) - 2026-06-10
 
 Wires MCP into the codex adapter, so `select("codex")` now advertises
-`supports_mcp=True` and an engineer/planner codex run keeps in-task memory
-grounding. The selector forwards the same `mcp_config` to both backends; the
-codex adapter owns the mechanism difference, so the consumer needs no rework.
+`supports_mcp=True` and `codex.invoke` can carry in-task memory tools. This is a
+**library-side enabler**: a consumer benefits only once it routes through
+`kagura_brain.select` (or otherwise forwards `mcp_config` to `codex.invoke`).
+kagura-engineer/kagura-planner still run their own `brain_select` that gates
+codex MCP off, so a follow-up there is needed before an engineer/planner codex
+run actually gains grounding.
 
 ### Changed
 - `codex.invoke` now accepts `mcp_config` (a claude-format `.mcp.json` path) and
   translates each `mcpServers` entry into a per-call `-c mcp_servers.<name>=<TOML>`
   config override — codex's equivalent of Claude Code's `--mcp-config` (codex has
-  no `--mcp-config` flag). Keys with no codex analog (e.g. claude's
-  `"type": "stdio"`) are dropped. `allowed_tools` is accepted for selector
-  signature parity but **not forwarded** — codex has no per-call tool allow-list
-  and gates MCP tool calls through its sandbox/approval model instead (pass
-  `sandbox=` / `bypass_approvals=True` for unattended MCP use).
+  no `--mcp-config` flag). The inline-table form is verified against codex
+  0.133.0. Keys with no codex analog (e.g. claude's `"type"`) are dropped;
+  `command` (stdio) and `url` (streamable_http) are mutually exclusive, so a
+  `command` wins and a conflicting `url` is dropped. A missing or non-JSON
+  `mcp_config` raises `ValueError` (the claude adapter defers an unread path to
+  its CLI; codex must parse it). All control chars are escaped in the emitted
+  TOML. `allowed_tools` is accepted for selector signature parity but **not
+  forwarded** — codex has no per-call tool allow-list and gates MCP tool calls
+  through its sandbox/approval model instead (pass `sandbox=` /
+  `bypass_approvals=True` for unattended MCP use); a non-empty value logs a
+  once-per-process warning so the drop is visible.
 - `selector`: `select("codex")` is now `supports_mcp=True`, and
   `BrainHandle.invoke` forwards `mcp_config`/`allowed_tools` to the codex adapter
   (previously dropped, logged once). The `_warn_codex_mcp_unsupported` drop-warning
   is removed. `BrainHandle.__post_init__` now requires `supports_mcp=True` for
-  both `"claude"` and `"codex"`.
+  both `"claude"` and `"codex"`. `_BACKENDS` is now a `name → supports_mcp` map
+  (the unused adapter-module slot was removed).
+
+### Notes
+- codex `-c` overrides **layer onto** `~/.codex/config.toml`; a server name that
+  collides with a differently-typed existing entry (e.g. an existing
+  streamable_http server) can fail config load — choose non-colliding names.
 
 ## [0.3.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.3.0) - 2026-06-10
 

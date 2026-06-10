@@ -52,6 +52,28 @@ Supplying only one of `endpoint`/`api_key` raises `ValueError`; a non-https
 endpoint emits a `UserWarning` (prompt + code context goes off-box). With none
 of these set, the default subscription-auth path is byte-for-byte unchanged.
 
+### Provider-neutral selector
+
+When a consumer supports **more than one backend**, `select` confines the
+`claude`/`codex` dispatch — and the "codex has no per-call MCP" rule — to the
+library, so each consumer no longer re-encodes it
+([#14](https://github.com/kagura-ai/kagura-brain/issues/14)):
+
+```python
+from kagura_brain import select, BRAIN_API_KEY_ENV
+
+# "claude" (default) → supports_mcp=True; "codex" → supports_mcp=False.
+handle = select(cfg.backend, endpoint=cfg.endpoint, api_key=os.environ.get(BRAIN_API_KEY_ENV))
+handle.invoke("…prompt…", cwd=repo, mcp_config=".mcp.json", allowed_tools=MEMORY_TOOLS)
+# claude → forwards mcp_config/allowed_tools; codex → drops them (logs once),
+# since codex wires MCP out-of-band. endpoint/api_key forward to both.
+```
+
+`select` takes **primitives, never a consumer's `Config`**, and never reads the
+env itself — the library owns only the standard name `BRAIN_API_KEY_ENV`
+(`"KAGURA_BRAIN_API_KEY"`); the consumer reads it and passes `api_key=` in. An
+unknown backend raises `ValueError`.
+
 ## Why a separate package (not folded into the memory SDK)
 
 Harness-support code splits cleanly along **two axes**:
@@ -110,6 +132,7 @@ Public surface is built incrementally under TDD, one consumer migration per PR:
 - [x] `codex.invoke()` — headless `codex exec` launcher (`OPENAI_*`/`CODEX_*` prefix scrub, `--`-guarded prompt, opt-in sandbox, BYO `endpoint`/`api_key` + `local_provider`)
 - [x] `verdict` — `PROCEED` set + exit-code map (contract only)
 - [x] `doctor` — provider-neutral check primitives (`check_binary`, `check_auth`, `check_endpoint`, `aggregate`) + presence-only `claude.check()`/`codex.check()` wrappers
+- [x] `select` — provider-neutral `BrainHandle` selector over the adapters (`supports_mcp` capability, codex MCP-drop confined to the library, `BRAIN_API_KEY_ENV` name)
 
 ## Development
 

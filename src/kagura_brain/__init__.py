@@ -22,6 +22,10 @@ Surface (built incrementally, TDD, one consumer per PR):
 - ``doctor``  — provider-neutral environment-check primitives (``check_binary`` /
                 ``check_auth`` / ``check_endpoint`` / ``aggregate``); the adapters
                 add presence-only ``claude.check()`` / ``codex.check()`` wrappers.
+- ``selector``— provider-neutral ``select(backend, ...) -> BrainHandle`` over the
+                adapters; the handle confines the claude/codex dispatch + the
+                "codex has no per-call MCP" rule (``BRAIN_API_KEY_ENV`` name only,
+                no env read) so consumers stop re-encoding it.
 
 Both adapters strip their provider's credential/endpoint overrides from the
 child env so the CLI's **subscription** login wins.
@@ -32,8 +36,20 @@ kagura-memory-python-sdk instead.
 
 from __future__ import annotations
 
-from . import claude, codex, core, doctor, verdict
+from . import claude, codex, core, doctor, selector, verdict
+from .selector import BRAIN_API_KEY_ENV, BrainHandle, select
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
-__all__ = ["__version__", "claude", "codex", "core", "doctor", "verdict"]
+__all__ = [
+    "BRAIN_API_KEY_ENV",
+    "BrainHandle",
+    "__version__",
+    "claude",
+    "codex",
+    "core",
+    "doctor",
+    "select",
+    "selector",
+    "verdict",
+]

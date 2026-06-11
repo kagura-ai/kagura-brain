@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.4.1) - 2026-06-11
+
+Fixes headless launch on **native Windows** (no WSL), where `claude`/`codex` are
+installed as npm `.cmd` shims. The launcher could not start them, and the
+straightforward fix would have opened a command-injection surface — both are
+addressed here. No public API change; a pure fix release.
+
+### Fixed
+- `core._run` now resolves `argv[0]` via `shutil.which` and launches a Windows
+  `.cmd`/`.bat` shim through `COMSPEC /c` (keeping `shell=False`). `CreateProcess`
+  only auto-appends `.exe` — never `PATHEXT` — so `subprocess.run(["claude", …])`
+  died with `WinError 2` even though the doctor pre-flight (`shutil.which`,
+  which *does* apply `PATHEXT`) reported the shim present. ([#17](https://github.com/kagura-ai/kagura-brain/issues/17), [#18](https://github.com/kagura-ai/kagura-brain/pull/18))
+
+### Security
+- The prompt now rides **stdin**, never an `argv` token. Routing a `.cmd`/`.bat`
+  shim through `cmd.exe /c` re-parses the command line, so an argv-borne prompt
+  containing `& | < > ^` or `%VAR%` would be corrupted (env-expanded even inside
+  quotes) or, via a `"`-then-`&` break-out, inject an arbitrary command — the
+  BatBadBut / CVE-2024-24576 class. Because adapters feed untrusted issue/PR/diff
+  text into the prompt, this was a real remote-influenced exec surface on
+  Windows. `core._run` gained a `stdin_text` parameter (forwarded as
+  `subprocess.run(input=…)`); the `claude`/`codex` adapters drop the `--`
+  separator + positional prompt and pass the prompt on stdin, so only
+  developer-controlled flags ever reach `cmd.exe`. ([#18](https://github.com/kagura-ai/kagura-brain/pull/18))
+
 ## [0.4.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.4.0) - 2026-06-10
 
 Wires MCP into the codex adapter, so `select("codex")` now advertises

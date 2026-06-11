@@ -3,8 +3,10 @@
 The Claude adapter runs the child on Claude Code **subscription** auth: it
 deny-sets the ``ANTHROPIC_*`` credential env vars (so a stale value inherited
 from a surrounding Claude Code session can't override the subscription login)
-and builds the `claude -p` argv with the ``--`` prompt separator. The shared
-subprocess/env/timeout/decode seam lives in ``kagura_brain.core``.
+and builds the `claude -p` argv with the prompt fed on **stdin** (never an argv
+token — issue #17 follow-up, so a Windows ``.cmd`` shim's ``cmd.exe`` re-parse
+can't corrupt or inject via the prompt). The shared subprocess/env/timeout/
+decode seam lives in ``kagura_brain.core``.
 """
 
 from __future__ import annotations
@@ -85,28 +87,54 @@ class TestInvoke:
 
         argv = captured["argv"]
         assert argv[:2] == ["claude", "-p"]
-        # The prompt is passed last, after a "--" separator, so a prompt that
-        # begins with "-" can't be parsed as an option.
-        assert argv[-2:] == ["--", "prompt text"]
+        # The prompt rides stdin (subprocess input=), never argv — so it can't be
+        # re-parsed by a Windows cmd.exe shim. argv carries only flags.
+        assert captured["kwargs"]["input"] == "prompt text"
+        assert "prompt text" not in argv
+        assert "--" not in argv
         assert "--mcp-config" in argv and "/repo/.mcp.json" in argv
         assert "--allowedTools" in argv and "mcp__kagura-memory__recall" in argv
-        # MCP flags precede the "--" separator (else they'd be swallowed as args).
-        assert argv.index("--mcp-config") < argv.index("--")
         assert captured["kwargs"]["cwd"] == Path("/repo")
         assert captured["kwargs"]["timeout"] == 42
 
-    def test_prompt_starting_with_dash_is_guarded_by_separator(
+    def test_prompt_starting_with_dash_rides_stdin_not_argv(
         self, monkeypatch
     ) -> None:
+        # Prompt on stdin is immune to option parsing — a "--version" prompt
+        # reaches the model on stdin and never appears in argv (no "--" guard
+        # needed, and no cmd.exe re-parse surface on Windows).
         captured: dict = {}
 
         def _run(*a, **k):
             captured["argv"] = a[0]
+            captured["kwargs"] = k
             return _Proc(0, "ok", "")
 
         monkeypatch.setattr(subprocess, "run", _run)
         invoke("--version")
-        assert captured["argv"][-2:] == ["--", "--version"]
+        assert captured["kwargs"]["input"] == "--version"
+        assert "--version" not in captured["argv"]
+
+    def test_prompt_with_cmd_metacharacters_rides_stdin_intact(
+        self, monkeypatch
+    ) -> None:
+        # Issue #17 follow-up: a prompt containing cmd.exe metacharacters and a
+        # %VAR% span must reach the child verbatim on stdin and NEVER appear in
+        # argv — otherwise a Windows .cmd shim launched via `cmd.exe /c` would
+        # re-parse it (corruption / command injection, BatBadBut class).
+        evil = 'fix this " & del /q C:\\repo\\* & echo %USERPROFILE% 50%'
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            captured["kwargs"] = k
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke(evil)
+        assert captured["kwargs"]["input"] == evil
+        assert evil not in captured["argv"]
+        assert all(evil not in token for token in captured["argv"])
 
 
 class TestSubscriptionAuthParity:

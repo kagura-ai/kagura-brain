@@ -42,11 +42,12 @@ class TestInvoke:
         assert res.stdout == "PONG"
         assert res.timed_out is False
 
-    def test_builds_codex_exec_argv_with_separator(self, monkeypatch) -> None:
+    def test_builds_codex_exec_argv_and_prompt_via_stdin(self, monkeypatch) -> None:
         captured: dict = {}
 
         def _run(*a, **k):
             captured["argv"] = a[0]
+            captured["kwargs"] = k
             return _Proc(0, "ok", "")
 
         monkeypatch.setattr(subprocess, "run", _run)
@@ -56,37 +57,45 @@ class TestInvoke:
         invoke("prompt text")
         argv = captured["argv"]
         assert argv[:2] == ["codex", "exec"]
-        # Prompt is positional and passed after "--" so it is never parsed as an
-        # option NOR as an `exec` subcommand (resume / review / help).
-        assert argv[-2:] == ["--", "prompt text"]
+        # The prompt rides stdin (codex exec reads instructions from stdin when
+        # no positional PROMPT is given), never argv — so a Windows cmd.exe shim
+        # can't re-parse it, and there is no "--" separator to add.
+        assert captured["kwargs"]["input"] == "prompt text"
+        assert "prompt text" not in argv
+        assert "--" not in argv
 
-    def test_prompt_starting_with_dash_is_guarded_by_separator(
+    def test_prompt_starting_with_dash_rides_stdin_not_argv(
         self, monkeypatch
     ) -> None:
+        # Prompt on stdin is immune to option parsing — a "--help" prompt reaches
+        # the model on stdin and never appears in argv.
         captured: dict = {}
 
         def _run(*a, **k):
             captured["argv"] = a[0]
+            captured["kwargs"] = k
             return _Proc(0, "ok", "")
 
         monkeypatch.setattr(subprocess, "run", _run)
         invoke("--help")
-        assert captured["argv"][-2:] == ["--", "--help"]
+        assert captured["kwargs"]["input"] == "--help"
+        assert "--help" not in captured["argv"]
 
-    def test_subcommand_name_prompt_is_guarded_by_separator(self, monkeypatch) -> None:
-        # "review" is a real `codex exec` subcommand; without the "--" separator
-        # a prompt of "review" would launch the review subcommand instead of
-        # being sent to the model.
+    def test_subcommand_name_prompt_rides_stdin_not_argv(self, monkeypatch) -> None:
+        # "review" is a real `codex exec` subcommand; on stdin a prompt of
+        # "review" is sent to the model and can never be parsed as the
+        # subcommand (it never appears in argv).
         captured: dict = {}
 
         def _run(*a, **k):
             captured["argv"] = a[0]
+            captured["kwargs"] = k
             return _Proc(0, "ok", "")
 
         monkeypatch.setattr(subprocess, "run", _run)
         invoke("review")
-        argv = captured["argv"]
-        assert argv[-2:] == ["--", "review"]
+        assert captured["kwargs"]["input"] == "review"
+        assert "review" not in captured["argv"]
 
     def test_sandbox_mode_adds_flag(self, monkeypatch) -> None:
         captured: dict = {}
@@ -99,8 +108,8 @@ class TestInvoke:
         invoke("idea", sandbox="read-only")
         argv = captured["argv"]
         assert "--sandbox" in argv and "read-only" in argv
-        # Sandbox flag precedes the "--" separator.
-        assert argv.index("--sandbox") < argv.index("--")
+        # The prompt rides stdin, so argv carries flags only (no "--" separator).
+        assert "--" not in argv
 
     def test_invalid_sandbox_mode_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -292,8 +301,8 @@ class TestLocalProvider:
         argv = captured["argv"]
         assert "--oss" in argv
         assert "--local-provider" in argv and "ollama" in argv
-        # Flags precede the "--" separator.
-        assert argv.index("--local-provider") < argv.index("--")
+        # The prompt rides stdin, so argv carries flags only (no "--" separator).
+        assert "--" not in argv
 
     def test_lmstudio_is_accepted(self, monkeypatch) -> None:
         captured: dict = {}
@@ -443,8 +452,8 @@ class TestMcpConfig:
         assert "--profile" in joined and "default" in joined
         # codex config has no "type" key — it must NOT leak into the override.
         assert "stdio" not in joined
-        # overrides precede the "--" prompt separator.
-        assert argv.index("-c") < argv.index("--")
+        # The prompt rides stdin, so argv carries flags only (no "--" separator).
+        assert "--" not in argv
 
     def test_no_mcp_config_emits_no_overrides(self, monkeypatch) -> None:
         captured = self._capture_argv(monkeypatch)

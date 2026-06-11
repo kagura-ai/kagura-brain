@@ -179,6 +179,31 @@ class TestRun:
         assert captured["kwargs"]["cwd"] == Path("/repo")
         assert captured["kwargs"]["timeout"] == 42
 
+    def test_stdin_text_is_forwarded_as_subprocess_input(self, monkeypatch) -> None:
+        # The prompt rides stdin via subprocess input=, never argv (issue #17
+        # follow-up — keeps it out of the Windows cmd.exe shim re-parse).
+        captured: dict = {}
+
+        def _capture(*a, **k):
+            captured["kwargs"] = k
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        _run(["tool"], stdin_text="the prompt")
+        assert captured["kwargs"]["input"] == "the prompt"
+
+    def test_default_stdin_text_is_none(self, monkeypatch) -> None:
+        # No stdin_text → input=None (no stdin pipe), the historical behaviour.
+        captured: dict = {}
+
+        def _capture(*a, **k):
+            captured["kwargs"] = k
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        _run(["tool"])
+        assert captured["kwargs"]["input"] is None
+
     def test_injects_env_after_scrub(self, monkeypatch) -> None:
         # scrub→inject order is load-bearing: a key that lives under a denied
         # prefix AND is re-supplied by the caller must end up with the CALLER's

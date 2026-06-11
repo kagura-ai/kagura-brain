@@ -106,16 +106,19 @@ def invoke(
         url_key="ANTHROPIC_BASE_URL",
         token_key="ANTHROPIC_AUTH_TOKEN",
     )
-    # ``-p``/``--print`` is a boolean flag and the prompt is positional, so a
-    # prompt beginning with ``-`` would be parsed as an option. The ``--``
-    # separator (after the MCP flags) forces it to be the prompt.
-    argv = ["claude", "-p", *mcp_args(mcp_config, allowed_tools), "--", prompt]
+    # The prompt rides stdin, not argv (issue #17 follow-up): a Windows ``.cmd``
+    # shim is launched via ``cmd.exe /c`` and would re-parse an argv-borne prompt
+    # (metachar / ``%VAR%`` injection). On stdin it also sidesteps the old
+    # ``-``-prefix footgun — ``claude -p`` reads the prompt from stdin when no
+    # positional is given, so no ``--`` separator is needed.
+    argv = ["claude", "-p", *mcp_args(mcp_config, allowed_tools)]
     return _run(
         argv,
         cwd=cwd,
         timeout=timeout,
         deny_prefixes=_AUTH_OVERRIDE_PREFIXES,
         inject_env=inject_env,
+        stdin_text=prompt,
     )
 
 

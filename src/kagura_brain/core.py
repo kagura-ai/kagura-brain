@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -115,6 +117,29 @@ def byo_inject_env(
     return {url_key: endpoint, token_key: api_key}
 
 
+def _launch_argv(argv: Sequence[str]) -> list[str]:
+    """Resolve ``argv[0]`` for spawning; wrap Windows ``.cmd``/``.bat`` shims.
+
+    Issue #17: on native Windows, ``CreateProcess`` only auto-appends ``.exe``
+    — it does NOT apply ``PATHEXT`` — so an npm shim like ``claude.cmd`` is
+    invisible to ``subprocess.run(["claude", ...], shell=False)`` (WinError 2)
+    even though ``shutil.which("claude")`` finds it. Spawn the which-resolved
+    absolute path so the pre-flight check and the launch can't diverge, and
+    route ``.cmd``/``.bat`` shims through the command interpreter explicitly
+    (``COMSPEC /c <shim>``) while keeping ``shell=False``. This is safe ONLY
+    because ``argv`` carries developer-controlled flags exclusively — the prompt
+    rides stdin (see :func:`_run`'s ``stdin_text``), so ``cmd.exe``'s re-parse of
+    its command line never sees attacker-influenced text and no injection
+    surface is opened. An unresolvable ``argv[0]`` is left as-is so the
+    documented ``OSError`` surfaces with the caller's own name.
+    """
+    exe = shutil.which(argv[0]) or argv[0]
+    if sys.platform == "win32" and exe.lower().endswith((".cmd", ".bat")):
+        comspec = os.environ.get("COMSPEC", "cmd.exe")
+        return [comspec, "/c", exe, *argv[1:]]
+    return [exe, *argv[1:]]
+
+
 def _run(
     argv: Sequence[str],
     *,
@@ -123,16 +148,29 @@ def _run(
     deny_exact: Sequence[str] = (),
     deny_prefixes: Sequence[str] = (),
     inject_env: Mapping[str, str] | None = None,
+    stdin_text: str | None = None,
 ) -> BrainResult:
     """Run one headless CLI subprocess with a scrubbed child env.
 
     Copies the parent environment and removes every key that is in
     ``deny_exact`` OR begins with any string in ``deny_prefixes``, so a stale
     credential / endpoint / config-home override cannot win over the CLI's
-    subscription login. ``argv`` is passed verbatim (the adapter is responsible
-    for the ``--`` prompt separator). ``OSError`` is deliberately NOT caught —
+    subscription login. ``argv[0]`` is resolved via :func:`_launch_argv`
+    (which-resolution + Windows ``.cmd``/``.bat`` comspec wrap, issue #17).
+    ``OSError`` is deliberately NOT caught —
     callers verify launchability via doctor first; it also surfaces a
     non-existent ``cwd`` (``FileNotFoundError``), not only a missing binary.
+
+    ``stdin_text`` (issue #17 follow-up) is fed to the child on **stdin** via
+    ``subprocess`` ``input=``. The prompt MUST travel this way, never as an
+    ``argv`` token: on native Windows a ``.cmd``/``.bat`` shim is launched
+    through ``cmd.exe /c`` (see :func:`_launch_argv`), and ``cmd.exe`` re-parses
+    its command line — metacharacters (``& | < > ^``) and ``%VAR%`` expansion in
+    an argv-borne prompt would corrupt it or inject a command (the BatBadBut /
+    CVE-2024-24576 class). Keeping the prompt on stdin means only
+    developer-controlled flags ever reach ``cmd.exe``, so no injection surface
+    is opened. ``argv`` therefore carries only flags; the adapter no longer
+    appends a ``--`` separator + positional prompt.
 
     ``inject_env`` (issue #2) sets caller-supplied vars *after* the deny-set
     sweep, so a deliberate BYO endpoint/token wins while ambient overrides under
@@ -152,9 +190,12 @@ def _run(
         child_env.update(inject_env)
     try:
         proc = subprocess.run(
-            list(argv),
+            _launch_argv(argv),
             cwd=cwd,
             capture_output=True,
+            # The prompt rides stdin, never argv — see the stdin_text docstring
+            # note (keeps it out of the Windows cmd.exe shim re-parse).
+            input=stdin_text,
             # Decode with utf-8/errors=replace (matching the timeout path) so a
             # non-UTF-8 locale or stray byte never raises inside _run.
             encoding="utf-8",

@@ -320,16 +320,20 @@ def invoke(
         url_key="OPENAI_BASE_URL",
         token_key="OPENAI_API_KEY",
     )
-    # The prompt is positional; ``exec`` also has subcommands (resume/review/help)
-    # and a prompt beginning with ``-`` would parse as an option. The ``--``
-    # separator forces the prompt to be the prompt in both cases.
-    argv = ["codex", "exec", *flags, *_mcp_overrides(mcp_config), "--", prompt]
+    # The prompt rides stdin, not argv (issue #17 follow-up): a Windows ``.cmd``
+    # shim is launched via ``cmd.exe /c`` and would re-parse an argv-borne prompt
+    # (metachar / ``%VAR%`` injection). ``codex exec`` reads instructions from
+    # stdin when no positional ``PROMPT`` is given, which also sidesteps the old
+    # ``-``-prefix and ``resume``/``review`` subcommand footguns — no ``--``
+    # separator is needed.
+    argv = ["codex", "exec", *flags, *_mcp_overrides(mcp_config)]
     return _run(
         argv,
         cwd=cwd,
         timeout=timeout,
         deny_prefixes=_AUTH_OVERRIDE_PREFIXES,
         inject_env=inject_env,
+        stdin_text=prompt,
     )
 
 

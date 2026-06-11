@@ -9,7 +9,9 @@ the adapter modules; this module is provider-neutral.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 
@@ -111,7 +113,11 @@ class TestRun:
         assert res.stdout == "PONG"
         assert res.timed_out is False
 
-    def test_passes_argv_through_verbatim(self, monkeypatch) -> None:
+    def test_passes_argv_through_verbatim_when_unresolvable(self, monkeypatch) -> None:
+        # argv[0] not found on PATH → leave it as-is so the OSError surfaces
+        # with the caller's own name (the documented "doctor verifies first"
+        # contract); the tail is never touched.
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
         captured: dict = {}
 
         def _capture(*a, **k):
@@ -265,6 +271,102 @@ class TestRun:
         res = _run(["tool"])
         assert res.stdout == "" and res.stderr == ""
         assert res.detail() == "timed out"
+
+
+class TestRunWindowsShimLaunch:
+    """Issue #17: launching ``claude`` on native Windows when it is an npm
+    ``.cmd`` shim (no ``.exe``).
+
+    ``CreateProcess`` only auto-appends ``.exe`` — it does NOT apply ``PATHEXT``
+    — so ``subprocess.run(["claude", ...], shell=False)`` dies with WinError 2
+    while ``shutil.which("claude")`` (which DOES apply ``PATHEXT``) happily
+    finds ``claude.cmd``: the pre-flight passes, the launch fails. ``_run``
+    must therefore spawn the *which-resolved* path, and route ``.cmd``/``.bat``
+    shims through the command interpreter (``COMSPEC /c``) explicitly, keeping
+    ``shell=False``.
+    """
+
+    def _capture_argv(self, monkeypatch) -> dict:
+        captured: dict = {}
+
+        def _capture(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        return captured
+
+    def test_resolves_argv0_to_which_result(self, monkeypatch) -> None:
+        # Always launch the which-resolved absolute path, so the pre-flight
+        # check and the actual spawn can never diverge again (POSIX included).
+        monkeypatch.setattr(shutil, "which", lambda _name: "/usr/local/bin/claude")
+        captured = self._capture_argv(monkeypatch)
+        _run(["claude", "--version"])
+        assert captured["argv"] == ["/usr/local/bin/claude", "--version"]
+
+    def test_windows_cmd_shim_is_wrapped_via_comspec(self, monkeypatch) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+        monkeypatch.setattr(shutil, "which", lambda _name: r"C:\nodejs\claude.cmd")
+        captured = self._capture_argv(monkeypatch)
+        _run(["claude", "--version"])
+        assert captured["argv"] == [
+            r"C:\Windows\System32\cmd.exe",
+            "/c",
+            r"C:\nodejs\claude.cmd",
+            "--version",
+        ]
+
+    def test_windows_bat_shim_is_wrapped_via_comspec(self, monkeypatch) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+        monkeypatch.setattr(shutil, "which", lambda _name: r"C:\tools\claude.bat")
+        captured = self._capture_argv(monkeypatch)
+        _run(["claude"])
+        assert captured["argv"] == [
+            r"C:\Windows\System32\cmd.exe",
+            "/c",
+            r"C:\tools\claude.bat",
+        ]
+
+    def test_windows_shim_suffix_match_is_case_insensitive(self, monkeypatch) -> None:
+        # Windows filesystems are case-preserving: a shim may resolve as
+        # ``CLAUDE.CMD`` and must still be wrapped.
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+        monkeypatch.setattr(shutil, "which", lambda _name: r"C:\nodejs\CLAUDE.CMD")
+        captured = self._capture_argv(monkeypatch)
+        _run(["claude"])
+        assert captured["argv"][:2] == [r"C:\Windows\System32\cmd.exe", "/c"]
+
+    def test_windows_comspec_defaults_to_cmd_exe(self, monkeypatch) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.delenv("COMSPEC", raising=False)
+        monkeypatch.setattr(shutil, "which", lambda _name: r"C:\nodejs\claude.cmd")
+        captured = self._capture_argv(monkeypatch)
+        _run(["claude"])
+        assert captured["argv"][0] == "cmd.exe"
+
+    def test_windows_exe_is_launched_directly(self, monkeypatch) -> None:
+        monkeypatch.setattr(sys, "platform", "win32")
+        monkeypatch.setattr(
+            shutil, "which", lambda _name: r"C:\Program Files\claude\claude.exe"
+        )
+        captured = self._capture_argv(monkeypatch)
+        _run(["claude", "--version"])
+        assert captured["argv"] == [
+            r"C:\Program Files\claude\claude.exe",
+            "--version",
+        ]
+
+    def test_posix_cmd_suffix_is_not_wrapped(self, monkeypatch) -> None:
+        # The comspec wrap is Windows-only: a POSIX file that merely *ends* in
+        # .cmd is an ordinary executable and is launched directly.
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(shutil, "which", lambda _name: "/opt/bin/claude.cmd")
+        captured = self._capture_argv(monkeypatch)
+        _run(["claude"])
+        assert captured["argv"] == ["/opt/bin/claude.cmd"]
 
 
 class TestByoInjectEnv:

@@ -50,6 +50,9 @@ class TestInvoke:
             return _Proc(0, "ok", "")
 
         monkeypatch.setattr(subprocess, "run", _run)
+        # Pin which-resolution to a miss so the adapter's bare "codex" argv is
+        # asserted as built; core's argv[0] resolution is covered in test_core.
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
         invoke("prompt text")
         argv = captured["argv"]
         assert argv[:2] == ["codex", "exec"]

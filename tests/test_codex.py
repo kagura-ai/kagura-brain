@@ -64,9 +64,7 @@ class TestInvoke:
         assert "prompt text" not in argv
         assert "--" not in argv
 
-    def test_prompt_starting_with_dash_rides_stdin_not_argv(
-        self, monkeypatch
-    ) -> None:
+    def test_prompt_starting_with_dash_rides_stdin_not_argv(self, monkeypatch) -> None:
         # Prompt on stdin is immune to option parsing — a "--help" prompt reaches
         # the model on stdin and never appears in argv.
         captured: dict = {}

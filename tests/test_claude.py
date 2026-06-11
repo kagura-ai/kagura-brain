@@ -97,9 +97,7 @@ class TestInvoke:
         assert captured["kwargs"]["cwd"] == Path("/repo")
         assert captured["kwargs"]["timeout"] == 42
 
-    def test_prompt_starting_with_dash_rides_stdin_not_argv(
-        self, monkeypatch
-    ) -> None:
+    def test_prompt_starting_with_dash_rides_stdin_not_argv(self, monkeypatch) -> None:
         # Prompt on stdin is immune to option parsing — a "--version" prompt
         # reaches the model on stdin and never appears in argv (no "--" guard
         # needed, and no cmd.exe re-parse surface on Windows).

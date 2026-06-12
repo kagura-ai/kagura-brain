@@ -47,6 +47,13 @@ __all__ = ["BrainResult", "CheckResult", "check", "extract_block", "invoke", "mc
 # ``CLAUDE_*`` var, so it is unaffected by the wider sweep.
 _AUTH_OVERRIDE_PREFIXES = ("ANTHROPIC_", "CLAUDE_")
 
+# Valid ``--permission-mode`` values for ``claude -p`` (Claude Code). ``invoke``
+# validates against this set so a typo (e.g. "acceptedits") surfaces as a
+# ``ValueError`` at the call boundary instead of an opaque CLI error. The harder
+# bypass (every tool pre-approved) is the separate ``--dangerously-skip-permissions``
+# flag, exposed as the ``dangerously_skip_permissions`` knob — not a mode here.
+_PERMISSION_MODES = ("default", "acceptEdits", "plan", "bypassPermissions")
+
 
 def mcp_args(mcp_config: str | None, allowed_tools: Sequence[str] = ()) -> list[str]:
     """Extra ``claude -p`` argv to attach an MCP server for in-task tool use.
@@ -77,6 +84,8 @@ def invoke(
     timeout: int = _DEFAULT_TIMEOUT_S,
     mcp_config: str | None = None,
     allowed_tools: Sequence[str] = (),
+    permission_mode: str | None = None,
+    dangerously_skip_permissions: bool = False,
     endpoint: str | None = None,
     api_key: str | None = None,
 ) -> BrainResult:
@@ -87,6 +96,24 @@ def invoke(
     :func:`kagura_brain.core._run` so a stale credential, endpoint override, or
     Bedrock/Vertex routing flag (``CLAUDE_CODE_USE_BEDROCK``/``_USE_VERTEX``, #11)
     cannot win over the subscription login.
+
+    **Permission knob (issue #21, opt-in).** In headless ``-p`` mode no human is
+    present to answer a permission prompt, so every tool needing approval
+    (``Bash``/``gh``/``git``/``Edit``/``Write``) is auto-denied and an autonomous
+    run cannot do real work. Two opt-in knobs lift that, mirroring the codex
+    adapter's ``sandbox`` / ``bypass_approvals``:
+
+    - ``permission_mode`` (one of :data:`_PERMISSION_MODES`) appends
+      ``--permission-mode <mode>``; an unrecognized mode raises ``ValueError``.
+    - ``dangerously_skip_permissions`` appends ``--dangerously-skip-permissions``
+      (full bypass — every tool pre-approved). This is what an autonomous "idea →
+      PR" consumer turns on deliberately; the run's red/yellow/green gates become
+      the safety layer instead of per-action prompts.
+
+    The two are mutually exclusive (``--dangerously-skip-permissions`` overrides
+    any ``--permission-mode``, so accepting both would emit a contradictory argv
+    that gives a false sense of confinement). The **default** sets neither, so the
+    headless invocation is byte-for-byte unchanged.
 
     **BYO endpoint (issue #2, opt-in).** Pass ``endpoint`` + ``api_key`` together
     to deliberately route at a caller-chosen Anthropic-compatible gateway: they
@@ -100,6 +127,25 @@ def invoke(
     Cloud is OpenAI-compatible, so it has no built-in preset here — supply your
     own Anthropic-compatible gateway URL.
     """
+    if permission_mode is not None and dangerously_skip_permissions:
+        # --dangerously-skip-permissions overrides any --permission-mode, so
+        # accepting both would hand back an argv whose --permission-mode is
+        # silently nullified — a false sense of confinement. Reject the conflict
+        # (mirrors codex's sandbox + bypass_approvals rejection).
+        raise ValueError(
+            "permission_mode and dangerously_skip_permissions are mutually "
+            "exclusive: --dangerously-skip-permissions overrides the permission mode"
+        )
+    perm_flags: list[str] = []
+    if permission_mode is not None:
+        if permission_mode not in _PERMISSION_MODES:
+            raise ValueError(
+                f"invalid permission_mode {permission_mode!r}; "
+                f"expected one of {_PERMISSION_MODES}"
+            )
+        perm_flags += ["--permission-mode", permission_mode]
+    if dangerously_skip_permissions:
+        perm_flags.append("--dangerously-skip-permissions")
     inject_env = byo_inject_env(
         endpoint,
         api_key,
@@ -111,7 +157,7 @@ def invoke(
     # (metachar / ``%VAR%`` injection). On stdin it also sidesteps the old
     # ``-``-prefix footgun — ``claude -p`` reads the prompt from stdin when no
     # positional is given, so no ``--`` separator is needed.
-    argv = ["claude", "-p", *mcp_args(mcp_config, allowed_tools)]
+    argv = ["claude", "-p", *perm_flags, *mcp_args(mcp_config, allowed_tools)]
     return _run(
         argv,
         cwd=cwd,

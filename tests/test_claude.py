@@ -135,6 +135,73 @@ class TestInvoke:
         assert all(evil not in token for token in captured["argv"])
 
 
+class TestPermissionMode:
+    """Issue #21 — opt-in permission knob for headless ``claude -p``.
+
+    In headless ``-p`` mode no human can answer a permission prompt, so every
+    tool that needs approval (``Bash``/``gh``/``git``/``Edit``/``Write``) is
+    auto-denied and an autonomous run cannot do real work. ``permission_mode``
+    appends ``--permission-mode <mode>`` and ``dangerously_skip_permissions``
+    appends ``--dangerously-skip-permissions`` so a consumer can opt into full
+    bypass deliberately. Mirrors the codex adapter's ``sandbox`` /
+    ``bypass_approvals`` knobs. The **default** adds neither — nothing changes
+    implicitly.
+    """
+
+    def test_permission_mode_adds_flag(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", permission_mode="acceptEdits")
+        argv = captured["argv"]
+        assert "--permission-mode" in argv and "acceptEdits" in argv
+
+    def test_invalid_permission_mode_raises(self) -> None:
+        with pytest.raises(ValueError):
+            invoke("idea", permission_mode="wide-open")
+
+    def test_dangerously_skip_permissions_adds_flag(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", dangerously_skip_permissions=True)
+        assert "--dangerously-skip-permissions" in captured["argv"]
+
+    def test_permission_mode_and_skip_are_mutually_exclusive(self) -> None:
+        # --dangerously-skip-permissions overrides any --permission-mode, so
+        # accepting both would emit a contradictory argv that gives a false
+        # sense of confinement — reject the conflict (codex sandbox+bypass parity).
+        with pytest.raises(ValueError):
+            invoke(
+                "idea",
+                permission_mode="acceptEdits",
+                dangerously_skip_permissions=True,
+            )
+
+    def test_no_permission_flag_by_default(self, monkeypatch) -> None:
+        # The permission knob is opt-in — the default invocation adds neither
+        # the mode flag nor the dangerous bypass, so nothing changes implicitly.
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        argv = captured["argv"]
+        assert "--permission-mode" not in argv
+        assert "--dangerously-skip-permissions" not in argv
+
+
 class TestSubscriptionAuthParity:
     """Parity with the codex adapter's env scrub (test_codex.py).
 

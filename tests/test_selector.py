@@ -204,6 +204,41 @@ class TestDangerouslySkipPermissions:
         assert captured["bypass_approvals"] is False
 
 
+class TestPermissionMode:
+    """Issue #21 follow-up — the milder, claude-only ``permission_mode`` knob at
+    the ``select`` seam.
+
+    ``dangerously_skip_permissions`` is the full-bypass nuclear option; without a
+    way to pass the milder ``permission_mode`` (``acceptEdits``/``plan``) through
+    the selector, a consumer that wants the safe middle ground would have to
+    bypass the seam and call ``claude.invoke`` directly. The selector forwards
+    ``permission_mode`` to claude, and rejects it for codex (no analog) rather
+    than silently dropping a confinement intent.
+    """
+
+    def test_claude_forwards_permission_mode(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            claude, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("claude").invoke("p", permission_mode="acceptEdits")
+        assert captured["permission_mode"] == "acceptEdits"
+
+    def test_claude_default_permission_mode_is_none(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            claude, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("claude").invoke("p")
+        assert captured["permission_mode"] is None
+
+    def test_codex_permission_mode_raises(self) -> None:
+        # codex has no --permission-mode analog; passing it must raise rather
+        # than silently drop the confinement intent (would mislead the caller).
+        with pytest.raises(ValueError):
+            select("codex").invoke("p", permission_mode="acceptEdits")
+
+
 class TestApiKeyEnvName:
     def test_standard_env_var_name(self) -> None:
         assert BRAIN_API_KEY_ENV == "KAGURA_BRAIN_API_KEY"

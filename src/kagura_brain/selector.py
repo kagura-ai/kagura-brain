@@ -100,6 +100,7 @@ class BrainHandle:
         timeout: int = _DEFAULT_TIMEOUT_S,
         mcp_config: str | None = None,
         allowed_tools: Sequence[str] = (),
+        permission_mode: str | None = None,
         dangerously_skip_permissions: bool = False,
     ) -> BrainResult:
         """Run one brain turn on this backend, returning its :class:`BrainResult`.
@@ -123,8 +124,24 @@ class BrainHandle:
         (``False``) forwards the safe, no-bypass value to both backends. The
         run's red/yellow/green gates are then the safety layer instead of
         per-action prompts.
+
+        ``permission_mode`` (issue #21) is the milder, claude-only knob
+        (``acceptEdits``/``plan``/… — see :data:`claude._PERMISSION_MODES`), the
+        safe middle ground between "no bypass" and the full
+        ``dangerously_skip_permissions``. codex has **no** ``--permission-mode``
+        analog, so passing it with a codex backend raises ``ValueError`` rather
+        than silently dropping a confinement intent — unlike ``allowed_tools``
+        (which codex harmlessly ignores), a dropped permission mode would mislead
+        the caller about how confined the run is. Use it only with claude.
         """
         if self.backend == "codex":
+            if permission_mode is not None:
+                raise ValueError(
+                    "permission_mode has no codex analog; it is claude-only. "
+                    "Use dangerously_skip_permissions (mapped to codex's "
+                    "--dangerously-bypass-approvals-and-sandbox) or call "
+                    "claude.invoke directly"
+                )
             return codex.invoke(
                 prompt,
                 cwd=cwd,
@@ -141,6 +158,7 @@ class BrainHandle:
             timeout=timeout,
             mcp_config=mcp_config,
             allowed_tools=allowed_tools,
+            permission_mode=permission_mode,
             dangerously_skip_permissions=dangerously_skip_permissions,
             endpoint=self.endpoint,
             api_key=self.api_key,

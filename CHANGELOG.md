@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.5.1) - 2026-06-12
+
+Follow-up hardening on the v0.5.0 permission knob plus CI maintenance. No
+functional or public-API change — documentation, a regression test, and a
+workflow fix.
+
+### Documentation
+- `selector.py`: document that the neutral `dangerously_skip_permissions` flag
+  has a **different blast radius per backend** — claude's
+  `--dangerously-skip-permissions` skips only approval prompts, while codex's
+  `--dangerously-bypass-approvals-and-sandbox` *also* disables the sandbox, so
+  the same `True` relaxes strictly more on codex. ([#23](https://github.com/kagura-ai/kagura-brain/issues/23), [#26](https://github.com/kagura-ai/kagura-brain/pull/26))
+- `claude.py`: document that `permission_mode="bypassPermissions"` is a full
+  bypass equivalent to `dangerously_skip_permissions` but without the
+  `dangerously_` signal in its name; callers who mean full bypass should prefer
+  the flag. ([#23](https://github.com/kagura-ai/kagura-brain/issues/23), [#26](https://github.com/kagura-ai/kagura-brain/pull/26))
+
+### Internal
+- Add an integration test that drives the **real** `codex.invoke` (mocking at
+  `subprocess.run`, not at `codex.invoke`) so the selector→codex
+  `bypass_approvals` contract is pinned against a future rename, which a
+  `codex.invoke` mock would silently swallow. ([#23](https://github.com/kagura-ai/kagura-brain/issues/23), [#26](https://github.com/kagura-ai/kagura-brain/pull/26))
+- CI: set `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` at workflow level in `ci.yml` and
+  `publish.yml` so pinned JS actions run on Node 24 ahead of GitHub's 2026-06-16
+  forced cutover (version-independent — also covers transitive actions); and
+  gitignore the `.kagura/` local harness-artifacts directory. ([#24](https://github.com/kagura-ai/kagura-brain/issues/24), [#25](https://github.com/kagura-ai/kagura-brain/pull/25))
+
 ## [0.5.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.5.0) - 2026-06-12
 
 Adds an **opt-in permission knob** so autonomous consumers can drive the headless

@@ -18,4 +18,5 @@ htmlcov/
 # Kagura harness config / secrets (never commit)
 repo.yaml
 .kagura.json
+.kagura/
 .mcp.json

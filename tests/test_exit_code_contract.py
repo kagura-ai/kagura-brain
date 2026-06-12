@@ -48,7 +48,10 @@ class TestTwoLevelContractCovered:
     def test_documents_reviewer_red_is_one(self) -> None:
         # code-reviewer's standalone invariant: verdict == red iff exit 1.
         # Documenting it is the whole point — the seam converts, brain does not.
-        assert "`1`" in _doc_text()
+        # Pin the specific reviewer-table row that ties code 1 to red, not a
+        # bare `1` (which appears all over the doc and would pass even if this
+        # row were deleted).
+        assert "`1` | red" in _doc_text()
 
     def test_explains_the_seam_conversion(self) -> None:
         # The engineer seam intercepts reviewer infra codes {2,3} → FAIL(1) and

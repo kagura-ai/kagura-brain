@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.5.0) - 2026-06-12
+
+Adds an **opt-in permission knob** so autonomous consumers can drive the headless
+brain unattended. In headless `claude -p` mode no human is present to answer a
+permission prompt, so every approval-gated tool (`Bash`/`gh`/`git`/`Edit`/`Write`)
+is auto-denied and an autonomous "idea → PR" run cannot do real work. The new
+knobs lift that deliberately; the default is unchanged (the headless invocation
+is byte-for-byte identical when neither knob is set).
+
+### Added
+- `claude.invoke()` gained two opt-in keywords: `permission_mode` (one of
+  `default`/`acceptEdits`/`plan`/`bypassPermissions`, appended as
+  `--permission-mode`; an unrecognized mode raises `ValueError`) and
+  `dangerously_skip_permissions` (appends `--dangerously-skip-permissions`, full
+  bypass). The two are mutually exclusive — passing both raises `ValueError`,
+  since `--dangerously-skip-permissions` would silently nullify the mode. Mirrors
+  the codex adapter's `sandbox` / `bypass_approvals`. ([#21](https://github.com/kagura-ai/kagura-brain/issues/21), [#22](https://github.com/kagura-ai/kagura-brain/pull/22))
+- `select().invoke()` gained a provider-neutral `dangerously_skip_permissions`
+  flag, mapped onto each backend's own mechanism (claude
+  `--dangerously-skip-permissions`, codex `--dangerously-bypass-approvals-and-sandbox`),
+  plus the claude-only `permission_mode` for the safe middle ground. Passing
+  `permission_mode` with a codex backend raises `ValueError` (no analog) rather
+  than silently dropping a confinement intent. ([#21](https://github.com/kagura-ai/kagura-brain/issues/21), [#22](https://github.com/kagura-ai/kagura-brain/pull/22))
+
+### Documentation
+- Added `docs/exit-code-contract.md`, the canonical reference for the ecosystem's
+  two-level exit-code contract — the gate vocabulary (`0` proceed / `2` halt,
+  owned by `verdict.py`) versus the standalone kagura-code-reviewer's internal
+  codes (`0`/`1`/`2`/`3`), and how the kagura-engineer seam reconciles them by
+  reading the JSON envelope rather than inferring a verdict from an exit code. A
+  docs-sync test pins the canonical codes against `verdict.py`. ([#19](https://github.com/kagura-ai/kagura-brain/issues/19), [#20](https://github.com/kagura-ai/kagura-brain/pull/20))
+
 ## [0.4.1](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.4.1) - 2026-06-11
 
 Fixes headless launch on **native Windows** (no WSL), where `claude`/`codex` are

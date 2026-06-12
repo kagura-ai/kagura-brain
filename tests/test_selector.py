@@ -157,6 +157,53 @@ class TestCodexHandleInvoke:
         assert captured["api_key"] == "secret"
 
 
+class TestDangerouslySkipPermissions:
+    """Issue #21 — the provider-neutral full-bypass knob at the ``select`` seam.
+
+    Headless brains auto-deny every approval-gated tool, so an autonomous
+    consumer (kagura-engineer) needs one neutral switch to run unattended. The
+    selector maps that single ``dangerously_skip_permissions`` flag onto each
+    backend's own mechanism — claude's ``dangerously_skip_permissions`` (→
+    ``--dangerously-skip-permissions``) and codex's ``bypass_approvals`` (→
+    ``--dangerously-bypass-approvals-and-sandbox``) — so ``select("codex")``
+    stays at parity. The **default** forwards the safe (no-bypass) value to both.
+    """
+
+    def test_claude_forwards_skip_permissions(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            claude, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("claude").invoke("p", dangerously_skip_permissions=True)
+        assert captured["dangerously_skip_permissions"] is True
+
+    def test_claude_default_does_not_skip(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            claude, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("claude").invoke("p")
+        assert captured["dangerously_skip_permissions"] is False
+
+    def test_codex_maps_to_bypass_approvals(self, monkeypatch) -> None:
+        # The neutral flag maps to codex's own mechanism (bypass_approvals), so a
+        # consumer doesn't re-encode the per-provider permission vocabulary.
+        captured: dict = {}
+        monkeypatch.setattr(
+            codex, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("codex").invoke("p", dangerously_skip_permissions=True)
+        assert captured["bypass_approvals"] is True
+
+    def test_codex_default_does_not_bypass(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            codex, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("codex").invoke("p")
+        assert captured["bypass_approvals"] is False
+
+
 class TestApiKeyEnvName:
     def test_standard_env_var_name(self) -> None:
         assert BRAIN_API_KEY_ENV == "KAGURA_BRAIN_API_KEY"

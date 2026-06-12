@@ -100,6 +100,7 @@ class BrainHandle:
         timeout: int = _DEFAULT_TIMEOUT_S,
         mcp_config: str | None = None,
         allowed_tools: Sequence[str] = (),
+        dangerously_skip_permissions: bool = False,
     ) -> BrainResult:
         """Run one brain turn on this backend, returning its :class:`BrainResult`.
 
@@ -110,6 +111,18 @@ class BrainHandle:
         overrides and ignores ``allowed_tools`` (no codex analog). The adapter is
         chosen by ``backend`` and each ``invoke`` is called directly (not via the
         registry) so its typed ``BrainResult`` return survives mypy strict.
+
+        ``dangerously_skip_permissions`` (issue #21) is the provider-neutral
+        full-bypass switch an autonomous consumer flips to run unattended: a
+        headless brain auto-denies every approval-gated tool (``Bash``/``gh``/
+        ``Edit``/…) because no human can answer the prompt. The selector maps this
+        single flag onto each backend's own mechanism — claude's
+        ``--dangerously-skip-permissions`` and codex's
+        ``--dangerously-bypass-approvals-and-sandbox`` — so the consumer never
+        re-encodes the per-provider permission vocabulary. The **default**
+        (``False``) forwards the safe, no-bypass value to both backends. The
+        run's red/yellow/green gates are then the safety layer instead of
+        per-action prompts.
         """
         if self.backend == "codex":
             return codex.invoke(
@@ -118,6 +131,7 @@ class BrainHandle:
                 timeout=timeout,
                 mcp_config=mcp_config,
                 allowed_tools=allowed_tools,
+                bypass_approvals=dangerously_skip_permissions,
                 endpoint=self.endpoint,
                 api_key=self.api_key,
             )
@@ -127,6 +141,7 @@ class BrainHandle:
             timeout=timeout,
             mcp_config=mcp_config,
             allowed_tools=allowed_tools,
+            dangerously_skip_permissions=dangerously_skip_permissions,
             endpoint=self.endpoint,
             api_key=self.api_key,
         )

@@ -28,7 +28,9 @@ class _Proc:
     ``subprocess.run`` so the REAL adapter (not a mocked ``*.invoke``) builds the
     argv, while never launching a CLI."""
 
-    def __init__(self, returncode: int = 0, stdout: str = "ok", stderr: str = "") -> None:
+    def __init__(
+        self, returncode: int = 0, stdout: str = "ok", stderr: str = ""
+    ) -> None:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr

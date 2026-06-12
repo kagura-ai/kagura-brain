@@ -134,7 +134,7 @@ Public surface is built incrementally under TDD, one consumer migration per PR:
 - [x] `core` — shared seam: `BrainResult`, `_run` (subprocess + env-scrub + timeout + utf-8 decode), `as_text`, `extract_block`
 - [x] `claude.invoke()` — headless `claude -p` launcher (`ANTHROPIC_*`/`CLAUDE_*` deny-set, `--`-guarded prompt, `mcp_args`, opt-in BYO `endpoint`/`api_key`)
 - [x] `codex.invoke()` — headless `codex exec` launcher (`OPENAI_*`/`CODEX_*` prefix scrub, `--`-guarded prompt, opt-in sandbox, BYO `endpoint`/`api_key` + `local_provider`)
-- [x] `verdict` — `PROCEED` set + exit-code map (contract only)
+- [x] `verdict` — `PROCEED` set + exit-code map (contract only); see the [exit-code contract](docs/exit-code-contract.md) for the canonical gate vocabulary vs reviewer-internal codes
 - [x] `doctor` — provider-neutral check primitives (`check_binary`, `check_auth`, `check_endpoint`, `aggregate`) + presence-only `claude.check()`/`codex.check()` wrappers
 - [x] `select` — provider-neutral `BrainHandle` selector over the adapters (`supports_mcp` capability; per-provider MCP wiring confined to the library — claude per-call flags, codex `-c mcp_servers.*`; `BRAIN_API_KEY_ENV` name)
 

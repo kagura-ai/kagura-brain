@@ -18,7 +18,9 @@ Exit codes: ``0`` = proceed (green/yellow), ``2`` = halt (red/unknown/missing).
    here is ``2`` (kagura-engineer's gate vocabulary). Reconciling code-reviewer
    onto ``2`` changes that tool's exit contract, so it is a deliberate,
    human-confirmed migration — importing this module does **not** do it
-   implicitly.
+   implicitly. The full two-level contract (canonical gate vocabulary vs
+   reviewer-internal codes, and how the engineer seam converts between them) is
+   codified in ``docs/exit-code-contract.md``.
 """
 
 from __future__ import annotations

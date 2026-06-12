@@ -21,6 +21,12 @@ on:
         options:
           - testpypi
 
+# Force Node.js 24 for pinned JS actions ahead of the 2026-06-16 deprecation of
+# Node 20 (actions/checkout, upload/download-artifact). Version-independent — drop
+# once those actions ship a Node-24 major. (#24)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   build:
     runs-on: ubuntu-latest

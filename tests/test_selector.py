@@ -11,6 +11,7 @@ are primitives the consumer supplies — the library never reads the env itself.
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -20,6 +21,17 @@ from kagura_brain import claude, codex
 from kagura_brain.core import BrainResult
 
 _SENTINEL = BrainResult(0, "ok", "")
+
+
+class _Proc:
+    """Minimal stand-in for ``subprocess.CompletedProcess`` — lets a test mock
+    ``subprocess.run`` so the REAL adapter (not a mocked ``*.invoke``) builds the
+    argv, while never launching a CLI."""
+
+    def __init__(self, returncode: int = 0, stdout: str = "ok", stderr: str = "") -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 class TestSelect:
@@ -237,6 +249,42 @@ class TestPermissionMode:
         # than silently drop the confinement intent (would mislead the caller).
         with pytest.raises(ValueError):
             select("codex").invoke("p", permission_mode="acceptEdits")
+
+
+class TestCodexContractIntegration:
+    """Issue #23 — pin the selector→codex param contract against the REAL
+    ``codex.invoke``, not a mock.
+
+    Every other selector test monkeypatches ``codex.invoke`` itself, so it
+    verifies the *selector's* call shape but never that ``codex.invoke`` actually
+    accepts ``bypass_approvals``. These tests mock one level deeper — at
+    ``subprocess.run`` — so the real ``codex.invoke`` runs and builds the real
+    argv. If codex's ``bypass_approvals`` parameter is ever renamed, ``select()``
+    would call it with an unknown kwarg and raise ``TypeError`` here, instead of a
+    ``codex.invoke`` mock silently swallowing the rename (the exact gap #23 flags).
+    """
+
+    def test_skip_permissions_reaches_codex_bypass_flag(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        select("codex").invoke("p", dangerously_skip_permissions=True)
+        assert "--dangerously-bypass-approvals-and-sandbox" in captured["argv"]
+
+    def test_default_does_not_add_codex_bypass_flag(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        select("codex").invoke("p")
+        assert "--dangerously-bypass-approvals-and-sandbox" not in captured["argv"]
 
 
 class TestApiKeyEnvName:

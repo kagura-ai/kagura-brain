@@ -52,6 +52,17 @@ _AUTH_OVERRIDE_PREFIXES = ("ANTHROPIC_", "CLAUDE_")
 # ``ValueError`` at the call boundary instead of an opaque CLI error. The harder
 # bypass (every tool pre-approved) is the separate ``--dangerously-skip-permissions``
 # flag, exposed as the ``dangerously_skip_permissions`` knob — not a mode here.
+#
+# ``bypassPermissions`` caveat (issue #23): it is a real Claude Code mode, so it
+# stays in this list, but its effect is **equivalent to a full bypass** — it
+# pre-approves every tool just like ``dangerously_skip_permissions``. It is the
+# one ``permission_mode`` value whose name does NOT carry the ``dangerously_``
+# signal, so a caller can reach full bypass through the milder-looking
+# ``permission_mode`` argument. The mutual-exclusion check below does not treat it
+# specially (it is a valid CLI mode, not the flag), so prefer
+# ``dangerously_skip_permissions=True`` when you mean full bypass — it surfaces
+# the danger in the argument name — and reserve ``permission_mode`` for the
+# genuinely milder modes (``acceptEdits``/``plan``).
 _PERMISSION_MODES = ("default", "acceptEdits", "plan", "bypassPermissions")
 
 

@@ -125,6 +125,17 @@ class BrainHandle:
         run's red/yellow/green gates are then the safety layer instead of
         per-action prompts.
 
+        **Blast radius differs by backend** (issue #23) — the one neutral flag is
+        deliberately not symmetric: claude's ``--dangerously-skip-permissions``
+        skips only the per-action *approval prompts*, whereas codex's
+        ``--dangerously-bypass-approvals-and-sandbox`` *also disables the
+        sandbox*. Both satisfy the "no human at the gate" need an autonomous
+        consumer has, but a codex run additionally loses sandbox isolation — so
+        the same ``True`` relaxes strictly more on codex than on claude. Weigh
+        that before flipping it for a codex backend; there is no neutral way to
+        skip codex approvals while keeping its sandbox (use ``codex.invoke`` with
+        ``sandbox=`` directly if you need that finer control).
+
         ``permission_mode`` (issue #21) is the milder, claude-only knob
         (``acceptEdits``/``plan``/… — see :data:`claude._PERMISSION_MODES`), the
         safe middle ground between "no bypass" and the full

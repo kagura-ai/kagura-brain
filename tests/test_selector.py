@@ -171,6 +171,52 @@ class TestCodexHandleInvoke:
         assert captured["api_key"] == "secret"
 
 
+class TestLocalProviderAndModel:
+    """Issue #28 — expose codex's local ``--oss`` provider and a per-call model
+    pin at the ``select`` seam, so a consumer can drive a local ollama backend
+    (or pin a BYO/cloud/subscription model) without dropping to ``codex.invoke``
+    directly. ``local_provider`` is codex-only — passing it to claude raises
+    rather than silently dropping the intent (mirrors permission_mode on codex).
+    """
+
+    def test_codex_forwards_local_provider(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            codex, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("codex").invoke("p", local_provider="ollama")
+        assert captured["local_provider"] == "ollama"
+
+    def test_codex_forwards_model(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            codex, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("codex").invoke("p", model="gpt-5-codex")
+        assert captured["model"] == "gpt-5-codex"
+
+    def test_codex_defaults_are_none(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            codex, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("codex").invoke("p")
+        assert captured["local_provider"] is None
+        assert captured["model"] is None
+
+    def test_claude_forwards_model(self, monkeypatch) -> None:
+        captured: dict = {}
+        monkeypatch.setattr(
+            claude, "invoke", lambda prompt, **k: captured.update(k) or _SENTINEL
+        )
+        select("claude").invoke("p", model="claude-opus-4-8")
+        assert captured["model"] == "claude-opus-4-8"
+
+    def test_claude_local_provider_raises(self) -> None:
+        with pytest.raises(ValueError, match="local_provider"):
+            select("claude").invoke("p", local_provider="ollama")
+
+
 class TestDangerouslySkipPermissions:
     """Issue #21 — the provider-neutral full-bypass knob at the ``select`` seam.
 

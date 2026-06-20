@@ -69,6 +69,13 @@ OLLAMA_CLOUD_ENDPOINT = "https://ollama.com/v1"
 # real endpoint is always a URL, so this short token cannot collide with one.
 _ENDPOINT_ALIASES = {"ollama-cloud": OLLAMA_CLOUD_ENDPOINT}
 
+# Id of the custom codex model_provider the BYO path defines AND selects (#27).
+# codex 0.141 prefers a file-based ChatGPT login (``~/.codex/auth.json``) over an
+# env-injected ``OPENAI_BASE_URL``, so a BYO run would silently route to the
+# ChatGPT account; selecting an explicit provider for the endpoint forces the
+# caller's endpoint to win regardless of any ambient login.
+_BYO_PROVIDER_ID = "kagura_byo"
+
 # Local backends Codex can drive via ``--oss --local-provider`` (Codex 0.133.0).
 _LOCAL_PROVIDERS = ("ollama", "lmstudio")
 
@@ -77,7 +84,13 @@ _LOCAL_PROVIDERS = ("ollama", "lmstudio")
 # (new OPENAI_*/CODEX_* override vars). The version is NOT asserted as a literal
 # anywhere — only its presence/shape is tested (a frozen literal would force a
 # test edit on every CLI bump for no safety gain).
-_CODEX_VERIFIED_VERSION = "0.133.0"
+#
+# 0.141.0 re-audit (#27): the BYO path was verified end-to-end against ollama-cloud
+# (a run reported `provider: kagura_byo` and returned a real answer, NOT the old
+# silent ChatGPT-account mis-route). 0.141 also REMOVED the `wire_api = "chat"`
+# custom-provider protocol — the BYO provider now declares `wire_api = "responses"`,
+# so a BYO endpoint must speak the OpenAI Responses API (Ollama Cloud does).
+_CODEX_VERIFIED_VERSION = "0.141.0"
 
 # Prefix sweep: every env var under these prefixes is stripped from the child so
 # the subscription login wins. See module docstring for the threat rationale.
@@ -244,11 +257,18 @@ def invoke(
     **BYO endpoint (issue #2, opt-in).** Two mutually-exclusive non-default
     backends:
 
-    - *Cloud / gateway* — ``endpoint`` + ``api_key`` (both required) are injected
-      as ``OPENAI_BASE_URL`` / ``OPENAI_API_KEY`` *after* the scrub, so the
-      caller-chosen endpoint wins while ambient overrides stay stripped.
-      ``endpoint="ollama-cloud"`` is an alias for :data:`OLLAMA_CLOUD_ENDPOINT`.
-      A non-https endpoint warns; supplying only one of the pair raises.
+    - *Cloud / gateway* — ``endpoint`` + ``api_key`` (both required). The key is
+      injected as ``OPENAI_API_KEY`` *after* the scrub, and the endpoint is wired
+      via a custom ``-c model_providers.<id>`` config override that is then
+      SELECTED with ``-c model_provider=<id>`` (#27): codex 0.141 prefers a
+      file-based ChatGPT login over an env-injected ``OPENAI_BASE_URL``, so
+      selecting an explicit provider is what forces the caller's endpoint to win
+      (an env-only override silently mis-routed to the ChatGPT account). The
+      provider declares ``wire_api = "responses"`` (0.141 removed the ``"chat"``
+      protocol), so **the BYO endpoint must speak the OpenAI Responses API**
+      (Ollama Cloud does). ``endpoint="ollama-cloud"`` is an alias for
+      :data:`OLLAMA_CLOUD_ENDPOINT`. A non-https endpoint warns; supplying only
+      one of the pair raises.
     - *Local* — ``local_provider`` (one of :data:`_LOCAL_PROVIDERS`) emits
       ``--oss --local-provider <p>`` for a local ollama/lmstudio backend. This
       needs no env override, so the scrub is untouched (nothing injected).
@@ -324,8 +344,29 @@ def invoke(
     # Resolve the friendly alias (e.g. "ollama-cloud") to its URL before building
     # the BYO inject-env; a literal URL (or None) passes through unchanged.
     resolved_endpoint = endpoint
+    byo_overrides: list[str] = []
     if endpoint is not None:
         resolved_endpoint = _ENDPOINT_ALIASES.get(endpoint, endpoint)
+        # #27: codex 0.141 prefers the file-based ChatGPT login over an env-injected
+        # OPENAI_BASE_URL, so a BYO run silently hit the ChatGPT account. Define an
+        # explicit OpenAI-compatible model_provider for the endpoint and SELECT it,
+        # so codex routes to the caller's endpoint regardless of any ambient login.
+        # The key still flows via the injected OPENAI_API_KEY (env_key references it).
+        # wire_api="responses": codex 0.141 removed the "chat" wire protocol for
+        # custom providers (config load errors with 'wire_api = "chat" is no longer
+        # supported'), so the BYO endpoint must speak the OpenAI Responses API.
+        provider_table = {
+            "name": _BYO_PROVIDER_ID,
+            "base_url": resolved_endpoint,
+            "env_key": "OPENAI_API_KEY",
+            "wire_api": "responses",
+        }
+        byo_overrides = [
+            "-c",
+            f"model_providers.{_BYO_PROVIDER_ID}={_toml_inline(provider_table)}",
+            "-c",
+            f"model_provider={_toml_str(_BYO_PROVIDER_ID)}",
+        ]
     inject_env = byo_inject_env(
         resolved_endpoint,
         api_key,
@@ -338,7 +379,7 @@ def invoke(
     # stdin when no positional ``PROMPT`` is given, which also sidesteps the old
     # ``-``-prefix and ``resume``/``review`` subcommand footguns — no ``--``
     # separator is needed.
-    argv = ["codex", "exec", *flags, *_mcp_overrides(mcp_config)]
+    argv = ["codex", "exec", *flags, *byo_overrides, *_mcp_overrides(mcp_config)]
     return _run(
         argv,
         cwd=cwd,

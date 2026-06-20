@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.6.0) - 2026-06-20
+
+Adds a **per-call model pin** and the **local `--oss` provider** at the selector
+seam, and fixes a **silent BYO-endpoint mis-route** on codex 0.141. Verified
+against codex-cli 0.141.0.
+
+### Added
+- `BrainHandle.invoke` (and the `codex` / `claude` adapters) gain `model` — pins
+  the model via `--model` on both backends — and `local_provider` — selects
+  codex's local `--oss --local-provider <ollama|lmstudio>` backend. `model`
+  validates at runtime per backend; `local_provider` is **codex-only** (passing
+  it to a claude handle raises, symmetric with `permission_mode` on codex). This
+  unblocks driving a fully-local or model-pinned brain through the selector
+  instead of dropping to `codex.invoke` directly. ([#28](https://github.com/kagura-ai/kagura-brain/issues/28), [#29](https://github.com/kagura-ai/kagura-brain/pull/29))
+
+### Fixed
+- **codex BYO endpoint silently overridden by the ChatGPT login (codex 0.141).**
+  codex 0.141 prefers the file-based ChatGPT login (`~/.codex/auth.json`) over an
+  env-injected `OPENAI_BASE_URL`, so `select(backend="codex", endpoint=...)` ran
+  on the ChatGPT account instead of the caller's endpoint — a correctness, cost,
+  and **data-egress** surprise. The BYO path now defines an explicit custom
+  `model_provider` for the endpoint and **selects** it (`-c model_providers.<id>`
+  + `-c model_provider=<id>`), forcing the caller's endpoint to win regardless of
+  any ambient login. codex 0.141 also removed the custom-provider
+  `wire_api = "chat"` protocol, so the provider declares `wire_api = "responses"`
+  — a BYO endpoint must speak the OpenAI Responses API (Ollama Cloud does).
+  Verified end-to-end against ollama-cloud (`provider: kagura_byo`, real answer);
+  `_CODEX_VERIFIED_VERSION` bumped to `0.141.0`. ([#27](https://github.com/kagura-ai/kagura-brain/issues/27), [#30](https://github.com/kagura-ai/kagura-brain/pull/30))
+
 ## [0.5.1](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.5.1) - 2026-06-12
 
 Follow-up hardening on the v0.5.0 permission knob plus CI maintenance. No

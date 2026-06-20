@@ -176,7 +176,13 @@ def invoke(
     # `--model` pins the model; codex's adapter does the same. None leaves the
     # headless argv byte-for-byte unchanged. Claude validates the name at runtime.
     model_flags = ["--model", model] if model is not None else []
-    argv = ["claude", "-p", *perm_flags, *model_flags, *mcp_args(mcp_config, allowed_tools)]
+    argv = [
+        "claude",
+        "-p",
+        *perm_flags,
+        *model_flags,
+        *mcp_args(mcp_config, allowed_tools),
+    ]
     return _run(
         argv,
         cwd=cwd,

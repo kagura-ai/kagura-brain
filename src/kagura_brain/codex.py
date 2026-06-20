@@ -345,7 +345,10 @@ def invoke(
     # the BYO inject-env; a literal URL (or None) passes through unchanged.
     resolved_endpoint = endpoint
     byo_overrides: list[str] = []
-    if endpoint is not None:
+    if endpoint:  # truthiness, matching byo_inject_env: "" is not a BYO request, so
+        # it must take the subscription path (no provider override), not a broken
+        # provider with an empty base_url. (endpoint="" + a real api_key still raises
+        # in byo_inject_env, the only-one-of-the-pair guard.)
         resolved_endpoint = _ENDPOINT_ALIASES.get(endpoint, endpoint)
         # #27: codex 0.141 prefers the file-based ChatGPT login over an env-injected
         # OPENAI_BASE_URL, so a BYO run silently hit the ChatGPT account. Define an

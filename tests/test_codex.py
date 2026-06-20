@@ -310,6 +310,21 @@ class TestByoEndpoint:
         joined = " ".join(captured["argv"])
         assert "model_provider" not in joined
 
+    def test_empty_endpoint_takes_the_subscription_path(self, monkeypatch) -> None:
+        # endpoint="" is NOT a BYO request (matches byo_inject_env's truthiness): no
+        # provider override, nothing injected — identical to the no-endpoint path, not
+        # a broken provider with an empty base_url.
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", endpoint="")
+        assert "model_provider" not in " ".join(captured["argv"])
+
     def test_endpoint_without_api_key_raises(self) -> None:
         with pytest.raises(ValueError):
             invoke("idea", endpoint="https://good.example/v1")

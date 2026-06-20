@@ -254,6 +254,77 @@ class TestByoEndpoint:
         assert codex.OLLAMA_CLOUD_ENDPOINT == "https://ollama.com/v1"
         assert captured["env"]["OPENAI_BASE_URL"] == codex.OLLAMA_CLOUD_ENDPOINT
 
+    # --- #27: force the BYO endpoint over a ChatGPT login -------------------
+
+    def test_byo_endpoint_defines_and_selects_a_custom_provider(
+        self, monkeypatch
+    ) -> None:
+        # codex 0.141 prefers the file-based ChatGPT login (~/.codex/auth.json) over
+        # an env-injected OPENAI_BASE_URL, silently routing a BYO run to the ChatGPT
+        # account. The adapter must DEFINE a custom model_provider pointing at the
+        # endpoint (base_url + env_key=OPENAI_API_KEY) AND SELECT it, so the run
+        # routes to the caller's endpoint regardless of any ambient login.
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", endpoint="https://gw.example/v1", api_key="sk-byo")
+        argv = captured["argv"]
+        joined = " ".join(argv)
+        # the provider table override carries the endpoint + the env key reference
+        assert "model_providers." in joined
+        assert "https://gw.example/v1" in joined
+        assert "OPENAI_API_KEY" in joined
+        # ...AND the provider is explicitly selected (else codex falls back to the
+        # ChatGPT login — the exact #27 silent mis-route).
+        assert any(tok.startswith("model_provider=") for tok in argv)
+        # codex 0.141 removed wire_api="chat" for custom providers; a regression to
+        # it fails config load, so pin the Responses-API protocol.
+        assert "wire_api" in joined and "responses" in joined
+
+    def test_ollama_cloud_alias_routes_via_provider_base_url(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", endpoint="ollama-cloud", api_key="sk-byo")
+        assert codex.OLLAMA_CLOUD_ENDPOINT in " ".join(captured["argv"])
+
+    def test_no_endpoint_emits_no_provider_override(self, monkeypatch) -> None:
+        # The default (subscription / ChatGPT-login) path must be untouched: no
+        # provider override, no selection — argv byte-for-byte as before.
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        joined = " ".join(captured["argv"])
+        assert "model_provider" not in joined
+
+    def test_empty_endpoint_takes_the_subscription_path(self, monkeypatch) -> None:
+        # endpoint="" is NOT a BYO request (matches byo_inject_env's truthiness): no
+        # provider override, nothing injected — identical to the no-endpoint path, not
+        # a broken provider with an empty base_url.
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            captured["env"] = k.get("env")
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", endpoint="")
+        assert "model_provider" not in " ".join(captured["argv"])
+
     def test_endpoint_without_api_key_raises(self) -> None:
         with pytest.raises(ValueError):
             invoke("idea", endpoint="https://good.example/v1")

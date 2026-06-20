@@ -97,6 +97,32 @@ class TestInvoke:
         assert captured["kwargs"]["cwd"] == Path("/repo")
         assert captured["kwargs"]["timeout"] == 42
 
+    def test_model_adds_model_flag(self, monkeypatch) -> None:
+        # Issue #28 — `model` pins the claude model via `--model`; None (the
+        # default) leaves the headless argv byte-for-byte unchanged.
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", model="claude-opus-4-8")
+        argv = captured["argv"]
+        assert "--model" in argv
+        assert argv[argv.index("--model") + 1] == "claude-opus-4-8"
+
+    def test_no_model_omits_the_flag(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "--model" not in captured["argv"]
+
     def test_prompt_starting_with_dash_rides_stdin_not_argv(self, monkeypatch) -> None:
         # Prompt on stdin is immune to option parsing — a "--version" prompt
         # reaches the model on stdin and never appears in argv (no "--" guard

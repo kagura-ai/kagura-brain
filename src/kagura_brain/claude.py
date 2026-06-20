@@ -99,6 +99,7 @@ def invoke(
     dangerously_skip_permissions: bool = False,
     endpoint: str | None = None,
     api_key: str | None = None,
+    model: str | None = None,
 ) -> BrainResult:
     """Run one headless ``claude -p`` on Claude Code subscription auth.
 
@@ -137,6 +138,10 @@ def invoke(
     a non-https endpoint warns (context goes off-box in the clear). Note: Ollama
     Cloud is OpenAI-compatible, so it has no built-in preset here — supply your
     own Anthropic-compatible gateway URL.
+
+    ``model`` (issue #28), when set, appends ``--model <model>`` to pin the model
+    (validated by Claude Code at runtime). ``None`` (default) leaves the headless
+    argv byte-for-byte unchanged.
     """
     if permission_mode is not None and dangerously_skip_permissions:
         # --dangerously-skip-permissions overrides any --permission-mode, so
@@ -168,7 +173,16 @@ def invoke(
     # (metachar / ``%VAR%`` injection). On stdin it also sidesteps the old
     # ``-``-prefix footgun — ``claude -p`` reads the prompt from stdin when no
     # positional is given, so no ``--`` separator is needed.
-    argv = ["claude", "-p", *perm_flags, *mcp_args(mcp_config, allowed_tools)]
+    # `--model` pins the model; codex's adapter does the same. None leaves the
+    # headless argv byte-for-byte unchanged. Claude validates the name at runtime.
+    model_flags = ["--model", model] if model is not None else []
+    argv = [
+        "claude",
+        "-p",
+        *perm_flags,
+        *model_flags,
+        *mcp_args(mcp_config, allowed_tools),
+    ]
     return _run(
         argv,
         cwd=cwd,

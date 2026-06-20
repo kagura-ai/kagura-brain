@@ -102,6 +102,8 @@ class BrainHandle:
         allowed_tools: Sequence[str] = (),
         permission_mode: str | None = None,
         dangerously_skip_permissions: bool = False,
+        local_provider: str | None = None,
+        model: str | None = None,
     ) -> BrainResult:
         """Run one brain turn on this backend, returning its :class:`BrainResult`.
 
@@ -144,6 +146,16 @@ class BrainHandle:
         than silently dropping a confinement intent — unlike ``allowed_tools``
         (which codex harmlessly ignores), a dropped permission mode would mislead
         the caller about how confined the run is. Use it only with claude.
+
+        ``model`` (issue #28) pins the model on either backend (``--model``):
+        codex (subscription / BYO endpoint / local ``--oss``) and claude both map
+        it onto their CLI's model flag; the backend validates the name at runtime.
+
+        ``local_provider`` (issue #28) selects codex's local ``--oss`` backend
+        (``"ollama"`` / ``"lmstudio"``) — the motivating case for a fully local,
+        no-cloud brain. It is **codex-only**: claude has no local backend, so
+        passing it to a claude handle raises ``ValueError`` (symmetric with
+        ``permission_mode`` on codex) rather than silently dropping the intent.
         """
         if self.backend == "codex":
             if permission_mode is not None:
@@ -162,6 +174,17 @@ class BrainHandle:
                 bypass_approvals=dangerously_skip_permissions,
                 endpoint=self.endpoint,
                 api_key=self.api_key,
+                local_provider=local_provider,
+                model=model,
+            )
+        if local_provider is not None:
+            # local_provider is codex's --oss-only concept (a local ollama/lmstudio
+            # process); claude has no local backend. Reject rather than silently
+            # drop the intent — symmetric with permission_mode on codex above.
+            raise ValueError(
+                "local_provider has no claude analog; it is codex --oss-only. "
+                "Use select('codex', ...).invoke(..., local_provider=...) for a "
+                "local backend, or call codex.invoke directly"
             )
         return claude.invoke(
             prompt,
@@ -173,6 +196,7 @@ class BrainHandle:
             dangerously_skip_permissions=dangerously_skip_permissions,
             endpoint=self.endpoint,
             api_key=self.api_key,
+            model=model,
         )
 
 

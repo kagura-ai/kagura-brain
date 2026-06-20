@@ -341,6 +341,49 @@ class TestLocalProvider:
         assert "OPENAI_BASE_URL" not in captured["env"]
 
 
+class TestModelFlag:
+    """Issue #28 — ``model`` pins the codex model via ``--model`` (subscription,
+    BYO endpoint, or a local ``--oss`` provider). ``None`` (the default) leaves
+    the argv byte-for-byte unchanged."""
+
+    def test_model_adds_model_flag(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", model="gpt-5-codex")
+        argv = captured["argv"]
+        assert "--model" in argv
+        assert argv[argv.index("--model") + 1] == "gpt-5-codex"
+
+    def test_model_pins_a_local_oss_model(self, monkeypatch) -> None:
+        # The motivating case (#28): a local ollama backend with a pinned model.
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea", local_provider="ollama", model="qwen2.5-coder:14b")
+        argv = captured["argv"]
+        assert "--oss" in argv and "qwen2.5-coder:14b" in argv
+
+    def test_no_model_omits_the_flag(self, monkeypatch) -> None:
+        captured: dict = {}
+
+        def _run(*a, **k):
+            captured["argv"] = a[0]
+            return _Proc(0, "ok", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        invoke("idea")
+        assert "--model" not in captured["argv"]
+
+
 class TestRuntimeSeam:
     def test_forwards_cwd_and_timeout(self, monkeypatch) -> None:
         captured: dict = {}

@@ -230,6 +230,7 @@ def invoke(
     endpoint: str | None = None,
     api_key: str | None = None,
     local_provider: str | None = None,
+    model: str | None = None,
     mcp_config: str | None = None,
     allowed_tools: Sequence[str] = (),
 ) -> BrainResult:
@@ -255,6 +256,12 @@ def invoke(
     Passing ``local_provider`` together with ``endpoint``/``api_key`` is a
     ``ValueError`` (a local backend and a remote endpoint are contradictory).
     With none of the three, the default subscription-auth path is unchanged.
+
+    ``model`` (issue #28), when set, appends ``--model <model>`` — pinning the
+    model under any auth mode (subscription / BYO endpoint / local ``--oss``).
+    codex validates the name at runtime (e.g. a ChatGPT login rejects a
+    non-OpenAI model); the adapter only passes it through. ``None`` (default)
+    leaves the argv unchanged.
 
     **MCP wiring.** ``mcp_config`` is a path to a claude-format ``.mcp.json``; its
     ``mcpServers`` are translated (:func:`_mcp_overrides`) into per-call
@@ -309,6 +316,11 @@ def invoke(
                 f"expected one of {_LOCAL_PROVIDERS}"
             )
         flags += ["--oss", "--local-provider", local_provider]
+    if model is not None:
+        # Pin the model (subscription, BYO endpoint, or a local --oss provider).
+        # codex validates the name at runtime (e.g. a ChatGPT login rejects a
+        # non-OpenAI model), so the adapter only passes it through.
+        flags += ["--model", model]
     # Resolve the friendly alias (e.g. "ollama-cloud") to its URL before building
     # the BYO inject-env; a literal URL (or None) passes through unchanged.
     resolved_endpoint = endpoint

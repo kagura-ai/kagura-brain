@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/kagura-ai-logo.png" alt="Kagura AI" width="420">
+</p>
+
 # kagura-brain
 
 The provider-neutral **"brain" layer** shared by Kagura's CLI-brain harnesses

@@ -90,7 +90,14 @@ _LOCAL_PROVIDERS = ("ollama", "lmstudio")
 # silent ChatGPT-account mis-route). 0.141 also REMOVED the `wire_api = "chat"`
 # custom-provider protocol — the BYO provider now declares `wire_api = "responses"`,
 # so a BYO endpoint must speak the OpenAI Responses API (Ollama Cloud does).
-_CODEX_VERIFIED_VERSION = "0.141.0"
+#
+# 0.145.0 re-audit: the auth-override env surface `codex exec` reads is still
+# entirely under the OPENAI_*/CODEX_* prefixes this adapter sweeps (CODEX_HOME,
+# the `-c`/`$CODEX_HOME/*.config.toml` config-layering channels) — no new
+# auth-override var appeared outside them, so the prefix sweep stays fail-secure.
+# Verified against the subscription path by a 120-call kagura-agent #188 bootstrap
+# smoke on 0.145 (every codex turn inherited the ChatGPT login, none mis-routed).
+_CODEX_VERIFIED_VERSION = "0.145.0"
 
 # Prefix sweep: every env var under these prefixes is stripped from the child so
 # the subscription login wins. See module docstring for the threat rationale.

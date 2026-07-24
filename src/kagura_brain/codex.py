@@ -76,7 +76,7 @@ _ENDPOINT_ALIASES = {"ollama-cloud": OLLAMA_CLOUD_ENDPOINT}
 # caller's endpoint to win regardless of any ambient login.
 _BYO_PROVIDER_ID = "kagura_byo"
 
-# Local backends Codex can drive via ``--oss --local-provider`` (Codex 0.133.0).
+# Local backends Codex can drive via ``--oss --local-provider`` (Codex 0.145.0).
 _LOCAL_PROVIDERS = ("ollama", "lmstudio")
 
 # Codex CLI version whose `codex exec` argv + auth/env surface this adapter was
@@ -103,7 +103,7 @@ _CODEX_VERIFIED_VERSION = "0.145.0"
 # the subscription login wins. See module docstring for the threat rationale.
 _AUTH_OVERRIDE_PREFIXES = ("OPENAI_", "CODEX_")
 
-# Valid `-s/--sandbox` policies per `codex exec --help` (Codex 0.133.0).
+# Valid `-s/--sandbox` policies per `codex exec --help` (Codex 0.145.0).
 _SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 
 # Keys of a claude-format ``.mcp.json`` server entry that map onto a codex
@@ -304,7 +304,7 @@ def invoke(
     ``sandbox`` / ``bypass_approvals``. Note: an MCP-server-using turn run under
     the default (no sandbox/bypass) may block on approval — pass ``sandbox=`` or
     ``bypass_approvals=True`` for unattended use. (The ``-c mcp_servers.*`` form is
-    verified against codex 0.133.0; CI mocks the subprocess.)
+    verified against codex 0.145.0; CI mocks the subprocess.)
     """
     # allowed_tools has no codex analog (see docstring); accepted for selector
     # parity only. Warn once (rather than silently dropping) so a consumer relying

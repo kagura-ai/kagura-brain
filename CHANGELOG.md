@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.6.1) - 2026-07-24
+
+Improves the package documentation and PyPI presentation, and refreshes the
+Codex CLI compatibility audit without changing runtime behavior or public APIs.
+
+### Changed
+- Re-audited the Codex subscription-auth environment deny surface against Codex
+  CLI 0.145.0 and updated the verified-version marker. No new auth override was
+  found outside the existing `OPENAI_*` / `CODEX_*` prefix sweep. ([#33](https://github.com/kagura-ai/kagura-brain/pull/33))
+
+### Documentation
+- Added the official Kagura AI logo to the project README. ([#32](https://github.com/kagura-ai/kagura-brain/pull/32))
+- Reorganized the root README around installation and core usage, and added
+  dedicated getting-started, provider-configuration, and architecture guides.
+  ([#34](https://github.com/kagura-ai/kagura-brain/pull/34))
+- Replaced repository-relative links and the logo source in the root README with
+  absolute GitHub URLs so they remain valid in the PyPI package description.
+  ([#35](https://github.com/kagura-ai/kagura-brain/pull/35))
+
 ## [0.6.0](https://github.com/kagura-ai/kagura-brain/releases/tag/v0.6.0) - 2026-06-20
 
 Adds a **per-call model pin** and the **local `--oss` provider** at the selector

@@ -41,7 +41,7 @@ from __future__ import annotations
 from . import claude, codex, core, doctor, selector, verdict
 from .selector import BRAIN_API_KEY_ENV, BrainHandle, select
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 __all__ = [
     "BRAIN_API_KEY_ENV",

@@ -1,7 +1,7 @@
 # Contributing
 
-Thanks for your interest in `kagura-brain` — the Claude-Code-driving
-layer shared by Kagura's CLI-brain harnesses.
+Thanks for your interest in `kagura-brain` — the provider-neutral CLI-agent
+launcher shared by Kagura's brain harnesses.
 
 ## Setup
 
@@ -13,14 +13,17 @@ uv sync --extra dev
 
 ## Scope (read before adding code)
 
-This is the **claude axis** of the harness-support split. It centralizes the
-seams for driving `claude -p` as a brain (launcher, Anthropic auth hygiene,
-verdict contract, doctor primitives).
+This is the **brain axis** of the harness-support split. It centralizes the
+seams for driving `claude -p` and `codex exec` as brains: launcher behavior,
+provider auth hygiene, MCP wiring, permission boundaries, the verdict contract,
+and doctor primitives.
 
 It deliberately depends on **no memory package**. MCP *config generation*
-(`.mcp.json`) lives in the `kagura-memory` SDK; this package only builds the
-generic `--mcp-config` argv (`proc.mcp_args`). Consumers (`kagura-engineer`,
-`kagura-planner`, `kagura-code-reviewer`) depend on both and wire them together.
+(`.mcp.json`) lives in the `kagura-memory` SDK; this package only consumes that
+generic format. Claude forwards it with per-call flags, while Codex translates
+its `mcpServers` entries into per-call config overrides. Consumers
+(`kagura-engineer`, `kagura-planner`, `kagura-code-reviewer`) depend on both
+axes and wire them together.
 
 **Do not** add a dependency on `kagura-memory` — it would invert the axis split.
 Keep this package memory-vocabulary-free: callers pass tool names in, they are
@@ -140,6 +143,8 @@ Types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `ci`
 - `from __future__ import annotations` at the top of each module
 - Google-style docstrings on public functions
 - No network or memory coupling in this package
+- Keep provider-specific policy in its adapter; share only behavior with the
+  same semantics in `core`
 
 ## Releasing
 

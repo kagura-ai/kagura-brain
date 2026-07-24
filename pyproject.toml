@@ -5,13 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "kagura-brain"
 dynamic = ["version"]
-description = "Brain layer for Kagura harnesses — headless CLI coding-agent launcher (claude -p today), subscription-auth hygiene, verdict, doctor primitives"
+description = "Provider-neutral CLI coding-agent launcher for Kagura harnesses, with auth hygiene, MCP wiring, verdicts, and doctor primitives"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Kagura AI", email = "dev@kagura-ai.com" }]
-keywords = ["claude-code", "ai-agent", "harness", "kagura", "subprocess", "headless"]
+keywords = ["claude-code", "codex", "ai-agent", "harness", "kagura", "subprocess", "headless"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development",
 ]
-# NOTE: axis-2 (Claude Code driving) lib — deliberately does NOT depend on
+# NOTE: brain-axis (Claude Code / Codex driving) lib — deliberately does NOT depend on
 # kagura-memory. The memory axis lives in the SDK; keeping this dependency-free
 # of memory makes the orthogonal-axes split structural (no cycle, no inversion).
 # No runtime dependencies: every module under ``src/kagura_brain/`` is stdlib-only

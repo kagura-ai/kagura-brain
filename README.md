@@ -103,7 +103,7 @@ the agent". The full module and launch-flow description is in
 
 ## Current release
 
-Version `0.6.0` supports Python 3.11-3.13. The Codex adapter's environment and
+Version `0.6.1` supports Python 3.11-3.13. The Codex adapter's environment and
 configuration assumptions were last audited against Codex CLI `0.145.0`; the
 subprocess suite remains mocked, so releases also require the documented real-CLI
 smoke test.

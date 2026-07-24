@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/kagura-ai-logo.png" alt="Kagura AI" width="420">
+  <img src="https://raw.githubusercontent.com/kagura-ai/kagura-brain/main/docs/kagura-ai-logo.png" alt="Kagura AI" width="420">
 </p>
 
 # kagura-brain
@@ -50,7 +50,8 @@ print(result.stdout)
 
 Neither adapter loosens permissions by default. Full-bypass options are explicit,
 and the Codex bypass also disables its sandbox. See
-[Provider configuration](docs/providers.md) before using an unattended mode.
+[Provider configuration](https://github.com/kagura-ai/kagura-brain/blob/main/docs/providers.md)
+before using an unattended mode.
 
 ## Install
 
@@ -70,7 +71,7 @@ The Python package is stdlib-only at runtime and deliberately has no dependency
 on `kagura-memory`.
 
 For setup, authentication, result handling, and first examples, read
-[Getting started](docs/getting-started.md).
+[Getting started](https://github.com/kagura-ai/kagura-brain/blob/main/docs/getting-started.md).
 
 ## Architecture at a glance
 
@@ -86,19 +87,19 @@ kagura-engineer   kagura-planner   kagura-code-reviewer
 `kagura-brain` launches the coding agent. `kagura-memory` supplies durable
 context. Keeping them independent avoids the inverted dependency "memory spawns
 the agent". The full module and launch-flow description is in
-[Architecture](docs/architecture.md).
+[Architecture](https://github.com/kagura-ai/kagura-brain/blob/main/docs/architecture.md).
 
 ## Documentation
 
 | Document | Purpose |
 |---|---|
-| [Documentation index](docs/README.md) | Map of the available guides and references |
-| [Getting started](docs/getting-started.md) | Installation, authentication, first invocation, and results |
-| [Provider configuration](docs/providers.md) | Claude/Codex options, MCP behavior, gateways, and permission boundaries |
-| [Architecture](docs/architecture.md) | Package boundaries, launch pipeline, modules, and security invariants |
-| [Exit-code contract](docs/exit-code-contract.md) | Canonical gate vocabulary and reviewer seam |
-| [Contributing](CONTRIBUTING.md) | Development workflow, quality gates, and release smoke tests |
-| [Changelog](CHANGELOG.md) | Release history |
+| [Documentation index](https://github.com/kagura-ai/kagura-brain/blob/main/docs/README.md) | Map of the available guides and references |
+| [Getting started](https://github.com/kagura-ai/kagura-brain/blob/main/docs/getting-started.md) | Installation, authentication, first invocation, and results |
+| [Provider configuration](https://github.com/kagura-ai/kagura-brain/blob/main/docs/providers.md) | Claude/Codex options, MCP behavior, gateways, and permission boundaries |
+| [Architecture](https://github.com/kagura-ai/kagura-brain/blob/main/docs/architecture.md) | Package boundaries, launch pipeline, modules, and security invariants |
+| [Exit-code contract](https://github.com/kagura-ai/kagura-brain/blob/main/docs/exit-code-contract.md) | Canonical gate vocabulary and reviewer seam |
+| [Contributing](https://github.com/kagura-ai/kagura-brain/blob/main/CONTRIBUTING.md) | Development workflow, quality gates, and release smoke tests |
+| [Changelog](https://github.com/kagura-ai/kagura-brain/blob/main/CHANGELOG.md) | Release history |
 
 ## Current release
 
@@ -117,9 +118,12 @@ uv run mypy
 uv run pytest tests/ -v
 ```
 
-Coverage must remain at or above 90%. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+Coverage must remain at or above 90%. See
+[CONTRIBUTING.md](https://github.com/kagura-ai/kagura-brain/blob/main/CONTRIBUTING.md) for
 the complete workflow.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Apache-2.0. See
+[LICENSE](https://github.com/kagura-ai/kagura-brain/blob/main/LICENSE) and
+[NOTICE](https://github.com/kagura-ai/kagura-brain/blob/main/NOTICE).
